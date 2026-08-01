@@ -60,7 +60,7 @@ func scanDestinations(columnCount int, scanTypes []reflect.Type) ([]any, []any) 
 
 func scannedValue(destination any) any {
 	value := reflect.ValueOf(destination)
-	for value.Kind() == reflect.Ptr {
+	for value.Kind() == reflect.Pointer {
 		if value.IsNil() {
 			return nil
 		}
