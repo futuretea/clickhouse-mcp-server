@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"example.invalid/mcp-template-module-placeholder/internal/cmd"
+	"github.com/futuretea/clickhouse-mcp-server/internal/cmd"
 )
 
 func main() {

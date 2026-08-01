@@ -7,11 +7,11 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"example.invalid/mcp-template-module-placeholder/internal/toolcatalog"
-	"example.invalid/mcp-template-module-placeholder/pkg/core/config"
-	"example.invalid/mcp-template-module-placeholder/pkg/core/version"
-	"example.invalid/mcp-template-module-placeholder/pkg/toolset"
-	"example.invalid/mcp-template-module-placeholder/pkg/toolset/example"
+	"github.com/futuretea/clickhouse-mcp-server/internal/toolcatalog"
+	"github.com/futuretea/clickhouse-mcp-server/pkg/core/config"
+	"github.com/futuretea/clickhouse-mcp-server/pkg/core/version"
+	"github.com/futuretea/clickhouse-mcp-server/pkg/toolset"
+	clickhousetoolset "github.com/futuretea/clickhouse-mcp-server/pkg/toolset/clickhouse"
 )
 
 // IOStreams groups the streams used by the CLI.
@@ -28,7 +28,7 @@ func NewRootCommand(streams IOStreams) *cobra.Command {
 
 	command := &cobra.Command{
 		Use:           version.BinaryName,
-		Short:         "MCP server template CLI and Model Context Protocol server",
+		Short:         "Read-only ClickHouse MCP server and CLI",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
@@ -81,12 +81,23 @@ func loadCLIConfig(cmd *cobra.Command, cfgFile string, v *viper.Viper) (*config.
 	return cfg, nil
 }
 
-func defaultToolsets() []toolset.Toolset {
-	return []toolset.Toolset{&example.Toolset{}}
+func defaultToolsets(cfg *config.StaticConfig) ([]toolset.Toolset, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("static config is required")
+	}
+	clickHouse, err := clickhousetoolset.NewToolset(cfg.ClickHouse)
+	if err != nil {
+		return nil, fmt.Errorf("configure ClickHouse tools: %w", err)
+	}
+	return []toolset.Toolset{clickHouse}, nil
 }
 
 func buildToolCatalog(cfg *config.StaticConfig) ([]toolset.ServerTool, error) {
-	return toolcatalog.Build(defaultToolsets(), toolset.FilterOptions{
+	toolsets, err := defaultToolsets(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return toolcatalog.Build(toolsets, toolset.FilterOptions{
 		EnabledTools:    cfg.EnabledTools,
 		DisabledTools:   cfg.DisabledTools,
 		EnabledDomains:  cfg.EnabledDomains,

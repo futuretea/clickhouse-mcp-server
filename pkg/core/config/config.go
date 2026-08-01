@@ -12,14 +12,24 @@ import (
 
 // StaticConfig contains configuration that is fixed when the server starts.
 type StaticConfig struct {
-	Port            int      `mapstructure:"port"`
-	Listen          string   `mapstructure:"listen"`
-	SSEBaseURL      string   `mapstructure:"sse_base_url"`
-	LogLevel        string   `mapstructure:"log_level"`
-	EnabledTools    []string `mapstructure:"enabled_tools"`
-	DisabledTools   []string `mapstructure:"disabled_tools"`
-	EnabledDomains  []string `mapstructure:"enabled_domains"`
-	DisabledDomains []string `mapstructure:"disabled_domains"`
+	Port            int              `mapstructure:"port"`
+	Listen          string           `mapstructure:"listen"`
+	SSEBaseURL      string           `mapstructure:"sse_base_url"`
+	LogLevel        string           `mapstructure:"log_level"`
+	EnabledTools    []string         `mapstructure:"enabled_tools"`
+	DisabledTools   []string         `mapstructure:"disabled_tools"`
+	EnabledDomains  []string         `mapstructure:"enabled_domains"`
+	DisabledDomains []string         `mapstructure:"disabled_domains"`
+	ClickHouse      ClickHouseConfig `mapstructure:"clickhouse"`
+}
+
+// ClickHouseConfig contains the HTTP(S) connection settings for ClickHouse.
+type ClickHouseConfig struct {
+	Address  string `mapstructure:"address"`
+	Database string `mapstructure:"database"`
+	Secure   bool   `mapstructure:"secure"`
+	Username string `mapstructure:"username"`
+	Password string `mapstructure:"password"`
 }
 
 // Validate checks whether the configuration can be used to start the server.
@@ -32,6 +42,32 @@ func (c *StaticConfig) Validate() error {
 	}
 	if _, err := zerolog.ParseLevel(c.LogLevel); err != nil {
 		return fmt.Errorf("invalid log_level %q: %w", c.LogLevel, err)
+	}
+	if err := c.ClickHouse.Validate(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// Validate checks whether the ClickHouse address can be used with HTTP(S).
+func (c ClickHouseConfig) Validate() error {
+	address := strings.TrimSpace(c.Address)
+	if address == "" {
+		return fmt.Errorf("clickhouse.address is required; set a host:port such as 127.0.0.1:8123")
+	}
+	if strings.Contains(address, "://") {
+		return fmt.Errorf("clickhouse.address must be host:port without a URL scheme")
+	}
+	if strings.ContainsAny(address, "/?@") {
+		return fmt.Errorf("clickhouse.address must be a host:port: %q", address)
+	}
+	host, port, err := net.SplitHostPort(address)
+	if err != nil || strings.TrimSpace(host) == "" || strings.ContainsAny(host, "/@?") {
+		return fmt.Errorf("clickhouse.address must be a host:port: %q", address)
+	}
+	portNumber, err := strconv.Atoi(port)
+	if err != nil || portNumber < 1 || portNumber > 65535 {
+		return fmt.Errorf("clickhouse.address must use a port from 1 to 65535")
 	}
 	return nil
 }
@@ -51,14 +87,19 @@ func LoadConfig(configPath string, v *viper.Viper) (*StaticConfig, error) {
 	}
 
 	defaults := map[string]any{
-		"port":             0,
-		"listen":           "127.0.0.1",
-		"sse_base_url":     "",
-		"log_level":        "info",
-		"enabled_tools":    []string{},
-		"disabled_tools":   []string{},
-		"enabled_domains":  []string{},
-		"disabled_domains": []string{},
+		"port":                0,
+		"listen":              "127.0.0.1",
+		"sse_base_url":        "",
+		"log_level":           "info",
+		"enabled_tools":       []string{},
+		"disabled_tools":      []string{},
+		"enabled_domains":     []string{},
+		"disabled_domains":    []string{},
+		"clickhouse.address":  "",
+		"clickhouse.database": "default",
+		"clickhouse.secure":   false,
+		"clickhouse.username": "",
+		"clickhouse.password": "",
 	}
 	for key, value := range defaults {
 		v.SetDefault(key, value)
@@ -83,6 +124,12 @@ func LoadConfig(configPath string, v *viper.Viper) (*StaticConfig, error) {
 
 	cfg.Listen = strings.TrimSpace(cfg.Listen)
 	cfg.LogLevel = strings.ToLower(strings.TrimSpace(cfg.LogLevel))
+	cfg.ClickHouse.Address = strings.TrimSpace(cfg.ClickHouse.Address)
+	cfg.ClickHouse.Database = strings.TrimSpace(cfg.ClickHouse.Database)
+	cfg.ClickHouse.Username = strings.TrimSpace(cfg.ClickHouse.Username)
+	if cfg.ClickHouse.Database == "" {
+		cfg.ClickHouse.Database = "default"
+	}
 	cfg.EnabledTools = normalizeStringSlice(cfg.EnabledTools)
 	cfg.DisabledTools = normalizeStringSlice(cfg.DisabledTools)
 	cfg.EnabledDomains = normalizeStringSlice(cfg.EnabledDomains)

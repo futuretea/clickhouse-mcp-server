@@ -6,11 +6,13 @@ import (
 
 	"github.com/spf13/viper"
 
-	"example.invalid/mcp-template-module-placeholder/pkg/core/config"
+	"github.com/futuretea/clickhouse-mcp-server/pkg/core/config"
 )
 
 func TestLoadConfigDefaults(t *testing.T) {
-	cfg, err := config.LoadConfig("", viper.New())
+	v := viper.New()
+	v.Set("clickhouse.address", "127.0.0.1:8123")
+	cfg, err := config.LoadConfig("", v)
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
@@ -22,6 +24,16 @@ func TestLoadConfigDefaults(t *testing.T) {
 	}
 	if cfg.LogLevel != "info" {
 		t.Fatalf("expected log_level info, got %q", cfg.LogLevel)
+	}
+	if cfg.ClickHouse.Database != "default" || cfg.ClickHouse.Secure {
+		t.Fatalf("unexpected ClickHouse defaults: %+v", cfg.ClickHouse)
+	}
+}
+
+func TestLoadConfigRequiresClickHouseAddress(t *testing.T) {
+	_, err := config.LoadConfig("", viper.New())
+	if err == nil || !strings.Contains(err.Error(), "clickhouse.address is required") {
+		t.Fatalf("LoadConfig error = %v", err)
 	}
 }
 
@@ -53,6 +65,33 @@ func TestValidate(t *testing.T) {
 			err := tt.cfg.Validate()
 			if err == nil || !strings.Contains(err.Error(), tt.wantSub) {
 				t.Fatalf("Validate() error = %v, want substring %q", err, tt.wantSub)
+			}
+		})
+	}
+}
+
+func TestClickHouseAddressValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		address string
+		wantErr string
+	}{
+		{name: "hostname", address: "clickhouse.local:8123"},
+		{name: "ipv6", address: "[::1]:8123"},
+		{name: "scheme", address: "http://localhost:8123", wantErr: "without a URL scheme"},
+		{name: "path", address: "localhost:8123/query", wantErr: "host:port"},
+		{name: "missing port", address: "localhost", wantErr: "host:port"},
+		{name: "bad port", address: "localhost:70000", wantErr: "port from 1 to 65535"},
+		{name: "userinfo", address: "alice@localhost:8123", wantErr: "host:port"},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			err := (config.ClickHouseConfig{Address: testCase.address}).Validate()
+			if testCase.wantErr == "" && err != nil {
+				t.Fatalf("Validate: %v", err)
+			}
+			if testCase.wantErr != "" && (err == nil || !strings.Contains(err.Error(), testCase.wantErr)) {
+				t.Fatalf("Validate error = %v, want %q", err, testCase.wantErr)
 			}
 		})
 	}

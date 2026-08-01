@@ -7,7 +7,7 @@ import (
 
 	mcpprotocol "github.com/mark3labs/mcp-go/mcp"
 
-	"example.invalid/mcp-template-module-placeholder/pkg/toolset"
+	"github.com/futuretea/clickhouse-mcp-server/pkg/toolset"
 )
 
 func TestNewToolHandlerReturnsErrorResult(t *testing.T) {

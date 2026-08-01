@@ -1,210 +1,156 @@
-# MCP Server Template
+# ClickHouse MCP Server
 
 [English](README.md)
 
-可 clone 的最小 MCP（Model Context Protocol）server 骨架。同一二进制同时提供给 AI 助手用的 **MCP server**，以及给人用的小型 **CLI**。内置示例工具 `echo` / `ping`。
+这是一个小型、默认只读的 ClickHouse MCP server。它通过 [`clickhouse-go/v2`](https://github.com/ClickHouse/clickhouse-go) 仅使用 HTTP(S) 连接 ClickHouse，并在 `/mcp` 提供 Streamable HTTP。
 
-## 初始化派生仓库
-
-从此模板创建仓库后，先替换明确的占位符，再开始构建：
-
-```bash
-./scripts/init-template.sh \
-  --module github.com/acme/my-mcp \
-  --binary my-mcp \
-  --npm-package @acme/my-mcp \
-  --image ghcr.io/acme/my-mcp
-```
-
-该命令会生成构建工作流。只有项目已准备发布时才加 `--with-release`；它会额外生成 npm 和 Docker 的 tag 发布工作流。镜像为 `ghcr.io/...` 时，加 `--use-ghcr` 可使用 `GITHUB_TOKEN` 发布到 GitHub Container Registry，无需 Docker registry 凭证。其他 registry 仍需配置凭证。启用发布前，请先配置 npm registry。使用 `--dry-run` 可只查看计划，不修改文件。
+MCP 服务本身不做认证，默认只监听 `127.0.0.1`。除非另行设计认证和网络边界，否则只应在可信的本地网络中使用。
 
 ## 快速开始
 
-```bash
-# 需要 Go 1.25+（见 .tool-versions）
-make build
-./bin/mcp-template-binary-placeholder version
+1. 复制示例配置并设置 ClickHouse HTTP 地址。
 
-# 启动 MCP server（默认 stdio）
-./bin/mcp-template-binary-placeholder mcp
+   ```bash
+   cp config.example.yaml config.yaml
+   ```
 
-# 不经过 MCP 客户端，直接用 CLI 列工具 / 调工具
-./bin/mcp-template-binary-placeholder tools list
-./bin/mcp-template-binary-placeholder tools call echo --params '{"message":"hello"}'
-./bin/mcp-template-binary-placeholder tools call ping --params '{}'
-```
+2. 构建并启动 HTTP 服务。
 
-## 功能
+   ```bash
+   make build
+   ./bin/clickhouse-mcp-server mcp --config config.yaml --port 8080
+   ```
 
-- **子命令 CLI**：`mcp` 才启动 server；`tools` / `version` / `completion` 独立
-- **多传输**：stdio、Streamable HTTP、SSE
-- **工具过滤**：`--enabled-tools`、`--disabled-tools`、`--enable-domains`、`--disable-domains`
-- **工程化默认项**：Makefile、Dockerfile、GitHub Actions CI、golangci-lint、MIT License
+3. 检查服务健康状态。
 
-## CLI 命令
+   ```bash
+   curl -s http://127.0.0.1:8080/healthz
+   # healthy
+   ```
 
-| 命令 | 作用 |
-|------|------|
-| `mcp-template-binary-placeholder mcp` | 启动 MCP server（stdio 或 HTTP） |
-| `mcp-template-binary-placeholder tools list` | 列出已启用工具 |
-| `mcp-template-binary-placeholder tools describe <name>` | 查看工具 schema |
-| `mcp-template-binary-placeholder tools call <name>` | 用 JSON 参数调用工具 |
-| `mcp-template-binary-placeholder version` | 打印构建信息 |
-| `mcp-template-binary-placeholder completion <shell>` | 生成 shell 补全脚本 |
+4. 将 MCP 客户端配置到 Streamable HTTP 端点。
 
-### tools 示例
+   ```json
+   {
+     "mcpServers": {
+       "clickhouse": {
+         "url": "http://127.0.0.1:8080/mcp"
+       }
+     }
+   }
+   ```
 
-```bash
-./bin/mcp-template-binary-placeholder tools list
-./bin/mcp-template-binary-placeholder tools list --json
-./bin/mcp-template-binary-placeholder tools describe echo
-./bin/mcp-template-binary-placeholder tools describe echo --json
-./bin/mcp-template-binary-placeholder tools call echo --params '{"message":"hello"}'
-echo '{"message":"hello"}' | ./bin/mcp-template-binary-placeholder tools call echo --params-file -
-./bin/mcp-template-binary-placeholder tools call ping --params '{}'
-```
+## 工具
 
-## MCP 传输模式
+所有成功调用都在 MCP text content 中返回 JSON。
 
-### Stdio（默认）
+| 工具 | 输入 | 结果 |
+|------|------|------|
+| `clickhouse_list_databases` | 无 | `{"databases":["default"]}` |
+| `clickhouse_list_tables` | 可选 `database` | 数据库名、表名、引擎和注释 |
+| `clickhouse_describe_table` | 必填 `table`，可选 `database` | 列名、类型、默认值和注释 |
+| `clickhouse_query` | 必填 `query`，可选正整数 `max_rows` | 列、显示字符串行、实际返回的 `row_count` 和 `truncated` |
 
-```bash
-./bin/mcp-template-binary-placeholder mcp
-```
+`clickhouse_query` 默认最多返回 1,000 行。服务会额外读取一行判断 `truncated: true`，但该额外行不会出现在结果中。每个非空单元格都会显示为字符串，使 JSON 结构稳定。
 
-Cursor / Claude Desktop 配置示例：
-
-```json
-{
-  "mcpServers": {
-    "mcp-template-binary-placeholder": {
-      "command": "/absolute/path/to/bin/mcp-template-binary-placeholder",
-      "args": ["mcp"]
-    }
-  }
-}
-```
-
-### Streamable HTTP
-
-```bash
-./bin/mcp-template-binary-placeholder mcp --port 8080
-curl -s http://127.0.0.1:8080/healthz
-```
-
-客户端配置示例：
-
-```json
-{
-  "mcpServers": {
-    "mcp-template-binary-placeholder": {
-      "url": "http://127.0.0.1:8080/mcp"
-    }
-  }
-}
-```
-
-### SSE
-
-与 HTTP 模式同一进程。端点：
-
-| 路径 | 用途 |
-|------|------|
-| `/healthz` | 健康检查（`GET`/`HEAD`） |
-| `/mcp` | Streamable HTTP |
-| `/sse` | SSE 连接 |
-| `/message` | SSE message endpoint |
-
-```bash
-./bin/mcp-template-binary-placeholder mcp --port 8080 --sse-base-url http://127.0.0.1:8080
-```
-
-### Docker
-
-```bash
-# 构建
-make docker
-
-# Stdio（默认 ENTRYPOINT 为 mcp-template-binary-placeholder mcp）
-docker run -i --rm mcp-template-image-placeholder:dev
-
-# HTTP
-docker run --rm -p 8080:8080 mcp-template-image-placeholder:dev --port 8080 --listen 0.0.0.0
-```
-
-HTTP / SSE **无鉴权、无 TLS**。默认 `--listen 127.0.0.1`。仅在受信网络使用；对外暴露时请自行加反向代理与认证。
+查询工具只接受一条 SQL。字符串、quoted identifier 和 SQL 注释中的分号可以使用；第二条语句会在到达 ClickHouse 前被拒绝。所有查询均携带 ClickHouse 的 `readonly=1` 设置，因此遵守此设置的 ClickHouse 会拒绝写入和 DDL。连接使用的 ClickHouse 用户仍应只授予读所需的权限。
 
 ## 配置
 
-优先级：**flags > 环境变量 > 配置文件 > 默认值**。
-
-### 环境变量
-
-| 变量 | 说明 | 默认 |
-|------|------|------|
-| `MCP_LOG_LEVEL` | 日志级别 | `info` |
-| `MCP_PORT` | HTTP 端口（`0` = stdio） | `0` |
-| `MCP_LISTEN` | HTTP 监听地址 | `127.0.0.1` |
-| `MCP_SSE_BASE_URL` | 对外 SSE base URL | `""` |
-
-### 配置文件
-
-见 `config.example.yaml`：
+优先级：**flags > 环境变量 > YAML 配置文件 > 默认值**。`clickhouse.address` 必填，格式必须是没有 scheme 或 path 的 `host:port`。
 
 ```yaml
-port: 0
+port: 8080
 listen: 127.0.0.1
-sse_base_url: ""
 log_level: info
-enabled_tools: []
-disabled_tools: []
-enabled_domains: []
-disabled_domains: []
+clickhouse:
+  address: 127.0.0.1:8123
+  database: default
+  secure: false
+  username: ""
+  password: ""
 ```
+
+| YAML 键 | 环境变量 | 默认值 | 含义 |
+|----------|----------|--------|------|
+| `clickhouse.address` | `MCP_CLICKHOUSE_ADDRESS` | 无 | 必填的 ClickHouse `host:port` 地址 |
+| `clickhouse.database` | `MCP_CLICKHOUSE_DATABASE` | `default` | 表工具使用的默认数据库 |
+| `clickhouse.secure` | `MCP_CLICKHOUSE_SECURE` | `false` | 对 ClickHouse 使用 HTTPS 而非 HTTP |
+| `clickhouse.username` | `MCP_CLICKHOUSE_USERNAME` | 空 | 可选 ClickHouse 用户名 |
+| `clickhouse.password` | `MCP_CLICKHOUSE_PASSWORD` | 空 | 可选 ClickHouse 密码 |
+| `port` | `MCP_PORT` | `0` | HTTP 端口；`0` 启动 stdio 模式 |
+| `listen` | `MCP_LISTEN` | `127.0.0.1` | HTTP 监听地址 |
+| `log_level` | `MCP_LOG_LEVEL` | `info` | 服务日志级别 |
+
+服务不会记录配置的密码。`secure: true` 只保护到 ClickHouse 的连接；它不会为 MCP HTTP 端点增加 TLS 或认证。
+
+## CLI
+
+CLI 使用同一份配置，可在没有 MCP 客户端时检查连通性。
 
 ```bash
-./bin/mcp-template-binary-placeholder mcp --config config.example.yaml --port 8080
+./bin/clickhouse-mcp-server tools list --config config.yaml
+./bin/clickhouse-mcp-server tools describe clickhouse_query --config config.yaml --json
+./bin/clickhouse-mcp-server tools call clickhouse_list_databases --config config.yaml
+./bin/clickhouse-mcp-server tools call clickhouse_query --config config.yaml \
+  --params '{"query":"SELECT version()"}'
 ```
 
-## 目录结构
+## 传输方式
 
+当 `port` 为 `0` 时，`mcp` 启动 stdio；非零时启动 HTTP 服务。HTTP 模式提供：
+
+| 路径 | 用途 |
+|------|------|
+| `/mcp` | 主要的 Streamable HTTP MCP 端点 |
+| `/healthz` | 健康检查（`GET` / `HEAD`） |
+| `/sse` | 兼容的 SSE MCP 端点 |
+| `/message` | SSE message 端点 |
+
+## Docker
+
+```bash
+make docker
+docker run --rm -p 8080:8080 \
+  -v "$PWD/config.yaml:/config.yaml:ro" \
+  clickhouse-mcp-server:dev --config /config.yaml --port 8080
 ```
-cmd/mcp-server/          # 入口
-internal/cmd/            # cobra CLI（mcp / tools / version / completion）
-pkg/core/                # config / logging / version
-pkg/server/mcp/          # MCP 注册与 transport
-pkg/server/http/         # HTTP / SSE / healthz
-pkg/toolset/             # Toolset 接口与过滤
-pkg/toolset/example/     # 示例 tools（替换为你的业务）
-.github/workflows/       # CI
-scripts/init-template.sh # 派生仓库初始化脚本
-templates/               # 由初始化脚本复制的 CI 与发布骨架
-```
 
-## 扩展自己的 tools
+不要把无认证的 HTTP 端口直接暴露到公网。
 
-1. 在 `pkg/toolset/<your-domain>/` 实现 `toolset.Toolset`。
-2. 在 `internal/cmd/root.go` 的 `defaultToolsets()` 中挂载。
-3. 用 `--enabled-tools` / `--enable-domains` 控制暴露面。
+## 排查
+
+- `clickhouse.address is required`：在配置中填写 `host:port`，例如 `127.0.0.1:8123`，或设置 `MCP_CLICKHOUSE_ADDRESS`。
+- 连接失败：检查地址、`secure` 值、ClickHouse HTTP 端口和网络可达性。
+- 查询被拒绝：确认 SQL 只有一条只读语句，且 ClickHouse 用户有目标数据库的访问权限。
+- `truncated: true`：在 SQL 中减少结果集，或有意识地提高 `max_rows`。
 
 ## 开发
 
 ```bash
-make tidy
 make format
 make lint
 make test
-make coverage
 make ci
-make build
-make docker
 ```
 
-生成的构建 CI（`.github/workflows/build.yaml`）会跑 lint、测试、多 OS 构建与 CLI smoke（`version` / `tools list`），以及 Docker 镜像构建。
+### 可选 ClickHouse 集成测试
 
-## 本地对照样例
+默认测试不依赖外部服务。这个 opt-in 集成测试会连接到配置的 ClickHouse HTTP 端点，验证数据库发现、`SELECT`，以及 `readonly=1` 会拒绝临时 DDL。请使用隔离实例：测试会有意尝试创建临时表，以证明只读设置确实生效。
 
-`third-party-projects/` 可放置本地对照代码，已在 `.gitignore` 中，不属于模板交付物。
+```bash
+docker run -d --rm --name clickhouse-mcp-integration \
+  -e CLICKHOUSE_SKIP_USER_SETUP=1 \
+  -p 127.0.0.1:8123:8123 \
+  clickhouse/clickhouse-server:26.5.6.64
+
+MCP_CLICKHOUSE_ADDRESS=127.0.0.1:8123 make test-integration
+docker stop clickhouse-mcp-integration
+```
+
+若隔离 ClickHouse 使用其他配置，可设置 `MCP_CLICKHOUSE_DATABASE`、`MCP_CLICKHOUSE_SECURE`、`MCP_CLICKHOUSE_USERNAME` 和 `MCP_CLICKHOUSE_PASSWORD`。缺少 `MCP_CLICKHOUSE_ADDRESS` 时目标会失败，不会静默跳过集成检查。
+
+仓库仍保留 `scripts/` 和 `templates/` 中的模板资产供本地参考；它们不属于 ClickHouse server 的运行时部分。
 
 ## License
 

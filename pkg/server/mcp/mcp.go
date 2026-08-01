@@ -12,10 +12,10 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/rs/zerolog/log"
 
-	"example.invalid/mcp-template-module-placeholder/internal/toolcatalog"
-	"example.invalid/mcp-template-module-placeholder/pkg/core/config"
-	"example.invalid/mcp-template-module-placeholder/pkg/core/version"
-	"example.invalid/mcp-template-module-placeholder/pkg/toolset"
+	"github.com/futuretea/clickhouse-mcp-server/internal/toolcatalog"
+	"github.com/futuretea/clickhouse-mcp-server/pkg/core/config"
+	"github.com/futuretea/clickhouse-mcp-server/pkg/core/version"
+	"github.com/futuretea/clickhouse-mcp-server/pkg/toolset"
 )
 
 // Configuration holds server startup settings.
@@ -163,7 +163,17 @@ func (s *Server) IsHealthy() bool {
 }
 
 // Close releases server resources.
-func (s *Server) Close() {}
+func (s *Server) Close() {
+	if s == nil || s.configuration == nil {
+		return
+	}
+	for _, configuredToolset := range s.configuration.Toolsets {
+		closer, ok := configuredToolset.(interface{ Close() error })
+		if ok {
+			_ = closer.Close()
+		}
+	}
+}
 
 // ServeStdio starts the MCP server over stdin/stdout.
 func (s *Server) ServeStdio() error {

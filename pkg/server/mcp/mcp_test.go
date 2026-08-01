@@ -7,16 +7,16 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 
-	"example.invalid/mcp-template-module-placeholder/pkg/core/config"
-	mcpserver "example.invalid/mcp-template-module-placeholder/pkg/server/mcp"
-	"example.invalid/mcp-template-module-placeholder/pkg/toolset"
-	"example.invalid/mcp-template-module-placeholder/pkg/toolset/example"
+	"github.com/futuretea/clickhouse-mcp-server/pkg/core/config"
+	mcpserver "github.com/futuretea/clickhouse-mcp-server/pkg/server/mcp"
+	"github.com/futuretea/clickhouse-mcp-server/pkg/toolset"
+	clickhousetoolset "github.com/futuretea/clickhouse-mcp-server/pkg/toolset/clickhouse"
 )
 
-func TestNewServerRegistersExampleTools(t *testing.T) {
+func TestNewServerRegistersClickHouseTools(t *testing.T) {
 	server, err := mcpserver.NewServer(mcpserver.Configuration{
 		StaticConfig: &config.StaticConfig{LogLevel: "info"},
-		Toolsets:     []toolset.Toolset{&example.Toolset{}},
+		Toolsets:     []toolset.Toolset{newClickHouseToolset(t)},
 	})
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
@@ -27,15 +27,17 @@ func TestNewServerRegistersExampleTools(t *testing.T) {
 		t.Fatal("expected healthy server")
 	}
 	tools := server.GetEnabledTools()
-	if len(tools) != 2 {
-		t.Fatalf("expected 2 tools, got %v", tools)
+	if len(tools) != 4 {
+		t.Fatalf("expected 4 tools, got %v", tools)
 	}
 	names := map[string]bool{}
 	for _, name := range tools {
 		names[name] = true
 	}
-	if !names["echo"] || !names["ping"] {
-		t.Fatalf("expected echo and ping, got %v", tools)
+	for _, name := range []string{"clickhouse_list_databases", "clickhouse_list_tables", "clickhouse_describe_table", "clickhouse_query"} {
+		if !names[name] {
+			t.Fatalf("expected %s, got %v", name, tools)
+		}
 	}
 }
 
@@ -52,7 +54,7 @@ func TestNewServerRejectsEmptyToolFilter(t *testing.T) {
 			LogLevel:     "info",
 			EnabledTools: []string{"missing"},
 		},
-		Toolsets: []toolset.Toolset{&example.Toolset{}},
+		Toolsets: []toolset.Toolset{newClickHouseToolset(t)},
 	})
 	if err == nil || !strings.Contains(err.Error(), "no tools registered") {
 		t.Fatalf("expected no tools registered error, got %v", err)
@@ -63,13 +65,22 @@ func TestNewServerRejectsDuplicateToolNames(t *testing.T) {
 	_, err := mcpserver.NewServer(mcpserver.Configuration{
 		StaticConfig: &config.StaticConfig{LogLevel: "info"},
 		Toolsets: []toolset.Toolset{
-			&example.Toolset{},
-			&example.Toolset{},
+			newClickHouseToolset(t),
+			newClickHouseToolset(t),
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), `duplicate tool name "echo"`) {
+	if err == nil || !strings.Contains(err.Error(), `duplicate tool name "clickhouse_list_databases"`) {
 		t.Fatalf("expected duplicate tool name error, got %v", err)
 	}
+}
+
+func newClickHouseToolset(t *testing.T) *clickhousetoolset.Toolset {
+	t.Helper()
+	toolset, err := clickhousetoolset.NewToolset(config.ClickHouseConfig{Address: "127.0.0.1:8123", Database: "default"})
+	if err != nil {
+		t.Fatalf("NewToolset: %v", err)
+	}
+	return toolset
 }
 
 func TestNewServerValidatesRawInputSchemaRootType(t *testing.T) {

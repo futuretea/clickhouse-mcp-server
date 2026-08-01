@@ -6,3 +6,9 @@ enabled_tools: []
 disabled_tools: []
 enabled_domains: []
 disabled_domains: []
+clickhouse:
+  address: 127.0.0.1:8123
+  database: default
+  secure: false
+  username: ""
+  password: ""

@@ -1,7 +1,9 @@
 package http_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net"
 	"net/http"
@@ -9,17 +11,17 @@ import (
 	"testing"
 	"time"
 
-	"example.invalid/mcp-template-module-placeholder/pkg/core/config"
-	internalhttp "example.invalid/mcp-template-module-placeholder/pkg/server/http"
-	mcpserver "example.invalid/mcp-template-module-placeholder/pkg/server/mcp"
-	"example.invalid/mcp-template-module-placeholder/pkg/toolset"
-	"example.invalid/mcp-template-module-placeholder/pkg/toolset/example"
+	"github.com/futuretea/clickhouse-mcp-server/pkg/core/config"
+	internalhttp "github.com/futuretea/clickhouse-mcp-server/pkg/server/http"
+	mcpserver "github.com/futuretea/clickhouse-mcp-server/pkg/server/mcp"
+	"github.com/futuretea/clickhouse-mcp-server/pkg/toolset"
+	clickhousetoolset "github.com/futuretea/clickhouse-mcp-server/pkg/toolset/clickhouse"
 )
 
 func TestHealthz(t *testing.T) {
 	mcpServer, err := mcpserver.NewServer(mcpserver.Configuration{
 		StaticConfig: &config.StaticConfig{LogLevel: "info"},
-		Toolsets:     []toolset.Toolset{&example.Toolset{}},
+		Toolsets:     []toolset.Toolset{newClickHouseToolset(t)},
 	})
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
@@ -65,10 +67,60 @@ func TestHealthz(t *testing.T) {
 	}
 }
 
+func TestStreamableHTTPListsClickHouseTools(t *testing.T) {
+	mcpServer, err := mcpserver.NewServer(mcpserver.Configuration{
+		StaticConfig: &config.StaticConfig{LogLevel: "info"},
+		Toolsets:     []toolset.Toolset{newClickHouseToolset(t)},
+	})
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	defer mcpServer.Close()
+
+	testServer := httptest.NewServer(internalhttp.NewHandler(mcpServer, &http.Server{}, ""))
+	defer testServer.Close()
+	payload := []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, testServer.URL+internalhttp.MCPEndpoint, bytes.NewReader(payload))
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	resp, err := testServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("POST tools/list: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("tools/list status=%d body=%s", resp.StatusCode, body)
+	}
+
+	var result struct {
+		Result struct {
+			Tools []struct {
+				Name string `json:"name"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("decode tools/list: %v", err)
+	}
+	names := make(map[string]bool, len(result.Result.Tools))
+	for _, tool := range result.Result.Tools {
+		names[tool.Name] = true
+	}
+	for _, name := range []string{"clickhouse_list_databases", "clickhouse_list_tables", "clickhouse_describe_table", "clickhouse_query"} {
+		if !names[name] {
+			t.Fatalf("tools/list missing %s: %+v", name, result.Result.Tools)
+		}
+	}
+}
+
 func TestServeListenerShutdown(t *testing.T) {
 	mcpServer, err := mcpserver.NewServer(mcpserver.Configuration{
 		StaticConfig: &config.StaticConfig{LogLevel: "info"},
-		Toolsets:     []toolset.Toolset{&example.Toolset{}},
+		Toolsets:     []toolset.Toolset{newClickHouseToolset(t)},
 	})
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
@@ -111,6 +163,15 @@ func TestServeListenerShutdown(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("ServeListener did not exit after cancel")
 	}
+}
+
+func newClickHouseToolset(t *testing.T) *clickhousetoolset.Toolset {
+	t.Helper()
+	toolset, err := clickhousetoolset.NewToolset(config.ClickHouseConfig{Address: "127.0.0.1:8123", Database: "default"})
+	if err != nil {
+		t.Fatalf("NewToolset: %v", err)
+	}
+	return toolset
 }
 
 type responseRecorder struct {
