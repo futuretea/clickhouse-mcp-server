@@ -158,7 +158,7 @@ make ci
 
 ### Optional ClickHouse integration test
 
-The default test suite has no external dependency. The opt-in integration test uses the configured ClickHouse HTTP endpoint to verify database discovery, `SELECT`, and that `readonly=1` rejects temporary DDL. Use an isolated instance: the test deliberately attempts a temporary table creation to prove the read-only setting is enforced.
+The default test suite has no external dependency. The opt-in integration test uses the configured ClickHouse HTTP endpoint to verify database discovery, `SELECT`, and that `readonly=1` rejects temporary DDL. It also builds the public server binary, starts it in HTTP mode on loopback, checks `/healthz`, and calls `tools/list` and `tools/call` through `/mcp`. Use an isolated instance: the test deliberately attempts a temporary table creation to prove the read-only setting is enforced.
 
 ```bash
 docker run -d --rm --name clickhouse-mcp-integration \
@@ -170,7 +170,7 @@ MCP_CLICKHOUSE_ADDRESS=127.0.0.1:8123 make test-integration
 docker stop clickhouse-mcp-integration
 ```
 
-Set `MCP_CLICKHOUSE_DATABASE`, `MCP_CLICKHOUSE_SECURE`, `MCP_CLICKHOUSE_USERNAME`, and `MCP_CLICKHOUSE_PASSWORD` when the target needs a different isolated ClickHouse configuration. The target runs both the read-only toolset integration test and `config check --connect`; it fails when `MCP_CLICKHOUSE_ADDRESS` is absent and never silently skips the integration check.
+Set `MCP_CLICKHOUSE_DATABASE`, `MCP_CLICKHOUSE_SECURE`, `MCP_CLICKHOUSE_USERNAME`, and `MCP_CLICKHOUSE_PASSWORD` when the target needs a different isolated ClickHouse configuration. The target runs the full MCP HTTP E2E test, the read-only toolset integration test, and `config check --connect`; it fails when `MCP_CLICKHOUSE_ADDRESS` is absent and never silently skips the integration check. It is local-only: neither `make test` nor the GitHub Actions CI workflow runs it.
 
 The repository retains its template assets under `scripts/` and `templates/` for local reference; they are not part of the ClickHouse server runtime.
 

@@ -158,7 +158,7 @@ make ci
 
 ### 可选 ClickHouse 集成测试
 
-默认测试不依赖外部服务。这个 opt-in 集成测试会连接到配置的 ClickHouse HTTP 端点，验证数据库发现、`SELECT`，以及 `readonly=1` 会拒绝临时 DDL。请使用隔离实例：测试会有意尝试创建临时表，以证明只读设置确实生效。
+默认测试不依赖外部服务。这个 opt-in 集成测试会连接到配置的 ClickHouse HTTP 端点，验证数据库发现、`SELECT`，以及 `readonly=1` 会拒绝临时 DDL。它还会构建公开的 server 二进制文件，以 HTTP 模式在 loopback 上启动，检查 `/healthz`，并经由 `/mcp` 调用 `tools/list` 和 `tools/call`。请使用隔离实例：测试会有意尝试创建临时表，以证明只读设置确实生效。
 
 ```bash
 docker run -d --rm --name clickhouse-mcp-integration \
@@ -170,7 +170,7 @@ MCP_CLICKHOUSE_ADDRESS=127.0.0.1:8123 make test-integration
 docker stop clickhouse-mcp-integration
 ```
 
-若隔离 ClickHouse 使用其他配置，可设置 `MCP_CLICKHOUSE_DATABASE`、`MCP_CLICKHOUSE_SECURE`、`MCP_CLICKHOUSE_USERNAME` 和 `MCP_CLICKHOUSE_PASSWORD`。该目标会同时运行只读工具集集成测试和 `config check --connect`；缺少 `MCP_CLICKHOUSE_ADDRESS` 时会失败，不会静默跳过集成检查。
+若隔离 ClickHouse 使用其他配置，可设置 `MCP_CLICKHOUSE_DATABASE`、`MCP_CLICKHOUSE_SECURE`、`MCP_CLICKHOUSE_USERNAME` 和 `MCP_CLICKHOUSE_PASSWORD`。该目标会运行完整 MCP HTTP E2E、只读工具集集成测试和 `config check --connect`；缺少 `MCP_CLICKHOUSE_ADDRESS` 时会失败，不会静默跳过集成检查。它只在本地运行：`make test` 和 GitHub Actions CI 都不会执行它。
 
 仓库仍保留 `scripts/` 和 `templates/` 中的模板资产供本地参考；它们不属于 ClickHouse server 的运行时部分。
 
