@@ -1,0 +1,8 @@
+{
+  "name": "@futuretea/clickhouse-mcp-server-linux-arm64",
+  "version": "0.0.0",
+  "description": "ClickHouse MCP Server binary for linux/arm64",
+  "files": ["bin/clickhouse-mcp-server"],
+  "os": ["linux"],
+  "cpu": ["arm64"]
+}

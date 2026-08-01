@@ -140,6 +140,19 @@ docker run --rm -p 8080:8080 \
 
 不要把无认证的 HTTP 端口直接暴露到公网。
 
+## 发布制品
+
+只有稳定的 `vX.Y.Z` Git tag 会触发发布。完成验证的稳定版本会更新 npm、Docker 和 GitHub Release 的 `latest` 指针；需要固定版本时请使用带版本号的引用。
+
+```bash
+npx -y @futuretea/clickhouse-mcp-server
+npx -y @futuretea/clickhouse-mcp-server@<version>
+docker run --rm -i ghcr.io/futuretea/clickhouse-mcp-server:latest
+docker run --rm -i ghcr.io/futuretea/clickhouse-mcp-server:v<version>
+```
+
+两种方式都会启动 `mcp` 命令，包名或镜像名之后的参数会传递给它。维护者需要配置拥有 `@futuretea` 发布权限的 GitHub Actions `NPM_TOKEN`；首次发布后，请将 GHCR package 可见性设为公开。
+
 ## 排查
 
 - `clickhouse.address is required`：在配置中填写 `host:port`，例如 `127.0.0.1:8123`，或设置 `MCP_CLICKHOUSE_ADDRESS`。

@@ -140,6 +140,19 @@ docker run --rm -p 8080:8080 \
 
 Do not publish the unauthenticated HTTP port directly to the internet.
 
+## Release artifacts
+
+Only stable `vX.Y.Z` Git tags trigger releases. A validated stable release updates the npm, Docker, and GitHub Release `latest` pointers; use a versioned reference when you need a fixed version.
+
+```bash
+npx -y @futuretea/clickhouse-mcp-server
+npx -y @futuretea/clickhouse-mcp-server@<version>
+docker run --rm -i ghcr.io/futuretea/clickhouse-mcp-server:latest
+docker run --rm -i ghcr.io/futuretea/clickhouse-mcp-server:v<version>
+```
+
+Both commands launch the `mcp` command. Arguments after the package or image are forwarded to it. Maintainers need a GitHub Actions `NPM_TOKEN` with publish permission for `@futuretea`; after the first release, set the GHCR package visibility to public.
+
 ## Troubleshooting
 
 - `clickhouse.address is required`: add a `host:port` value such as `127.0.0.1:8123` to the configuration or `MCP_CLICKHOUSE_ADDRESS`.

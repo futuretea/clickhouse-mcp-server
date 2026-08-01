@@ -1,0 +1,35 @@
+{
+  "name": "@futuretea/clickhouse-mcp-server",
+  "version": "0.0.0",
+  "description": "Read-only ClickHouse Model Context Protocol server",
+  "main": "./bin/index.js",
+  "bin": {
+    "clickhouse-mcp-server": "bin/index.js"
+  },
+  "optionalDependencies": {
+    "@futuretea/clickhouse-mcp-server-darwin-amd64": "0.0.0",
+    "@futuretea/clickhouse-mcp-server-darwin-arm64": "0.0.0",
+    "@futuretea/clickhouse-mcp-server-linux-amd64": "0.0.0",
+    "@futuretea/clickhouse-mcp-server-linux-arm64": "0.0.0",
+    "@futuretea/clickhouse-mcp-server-windows-amd64": "0.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/futuretea/clickhouse-mcp-server.git"
+  },
+  "keywords": [
+    "mcp",
+    "clickhouse",
+    "database",
+    "model-context-protocol"
+  ],
+  "author": {
+    "name": "futuretea",
+    "url": "https://github.com/futuretea"
+  },
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/futuretea/clickhouse-mcp-server/issues"
+  },
+  "homepage": "https://github.com/futuretea/clickhouse-mcp-server#readme"
+}

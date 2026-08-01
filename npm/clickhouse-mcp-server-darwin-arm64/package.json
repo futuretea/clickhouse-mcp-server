@@ -1,0 +1,8 @@
+{
+  "name": "@futuretea/clickhouse-mcp-server-darwin-arm64",
+  "version": "0.0.0",
+  "description": "ClickHouse MCP Server binary for darwin/arm64",
+  "files": ["bin/clickhouse-mcp-server"],
+  "os": ["darwin"],
+  "cpu": ["arm64"]
+}

@@ -7,7 +7,7 @@ LDFLAGS := -X github.com/futuretea/clickhouse-mcp-server/pkg/core/version.Versio
 	-X github.com/futuretea/clickhouse-mcp-server/pkg/core/version.Commit=$(COMMIT) \
 	-X github.com/futuretea/clickhouse-mcp-server/pkg/core/version.Date=$(DATE)
 
-# __MCP_RELEASE_INCLUDE__
+-include release.mk
 
 .PHONY: build test test-integration test-template-init lint format tidy ci clean docker coverage
 
