@@ -171,19 +171,13 @@ make ci
 
 ### Optional ClickHouse integration test
 
-The default test suite has no external dependency. The opt-in integration test uses the configured ClickHouse HTTP endpoint to verify database discovery, `SELECT`, and that `readonly=1` rejects temporary DDL. It also builds the public server binary, starts it in HTTP mode on loopback, checks `/healthz`, and calls `tools/list` and `tools/call` through `/mcp`. Use an isolated instance: the test deliberately attempts a temporary table creation to prove the read-only setting is enforced.
+The default test suite has no external dependency. The opt-in integration test starts an isolated local ClickHouse Docker container to verify database discovery, parameterized table inspection, `SELECT`, and that `readonly=1` rejects temporary DDL. It also builds the public server binary, starts it in HTTP mode on loopback, checks `/healthz`, and calls `tools/list` and `tools/call` through `/mcp`.
 
 ```bash
-docker run -d --rm --name clickhouse-mcp-integration \
-  -e CLICKHOUSE_SKIP_USER_SETUP=1 \
-  -p 127.0.0.1:8123:8123 \
-  clickhouse/clickhouse-server:26.5.6.64
-
-MCP_CLICKHOUSE_ADDRESS=127.0.0.1:8123 make test-integration
-docker stop clickhouse-mcp-integration
+make test-integration
 ```
 
-Set `MCP_CLICKHOUSE_DATABASE`, `MCP_CLICKHOUSE_SECURE`, `MCP_CLICKHOUSE_USERNAME`, and `MCP_CLICKHOUSE_PASSWORD` when the target needs a different isolated ClickHouse configuration. The target runs the full MCP HTTP E2E test, the read-only toolset integration test, and `config check --connect`; it fails when `MCP_CLICKHOUSE_ADDRESS` is absent and never silently skips the integration check. It is local-only: neither `make test` nor the GitHub Actions CI workflow runs it.
+The target requires Docker and `curl`, creates a random loopback port, waits for ClickHouse health, and removes its container on exit. Set `CLICKHOUSE_INTEGRATION_IMAGE` to test another isolated image. It runs the full MCP HTTP E2E test, the read-only toolset integration test, and `config check --connect`. It is local-only: neither `make test` nor the GitHub Actions CI workflow runs it.
 
 The repository retains its template assets under `scripts/` and `templates/` for local reference; they are not part of the ClickHouse server runtime.
 

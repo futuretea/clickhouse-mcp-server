@@ -8,8 +8,11 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/rs/zerolog"
 
 	"github.com/futuretea/clickhouse-mcp-server/pkg/core/config"
 	internalhttp "github.com/futuretea/clickhouse-mcp-server/pkg/server/http"
@@ -114,6 +117,24 @@ func TestStreamableHTTPListsClickHouseTools(t *testing.T) {
 		if !names[name] {
 			t.Fatalf("tools/list missing %s: %+v", name, result.Result.Tools)
 		}
+	}
+}
+
+func TestRequestMiddlewareLogsPathWithoutQueryString(t *testing.T) {
+	var logs bytes.Buffer
+	handler := internalhttp.RequestMiddlewareWithLogger(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}), zerolog.New(&logs).Level(zerolog.DebugLevel))
+
+	request := httptest.NewRequest(http.MethodGet, "http://example.test/mcp?access_token=must-not-appear", nil)
+	handler.ServeHTTP(httptest.NewRecorder(), request)
+
+	output := logs.String()
+	if !strings.Contains(output, `"path":"/mcp"`) || !strings.Contains(output, `"status":204`) {
+		t.Fatalf("log output = %q", output)
+	}
+	if strings.Contains(output, "?") || strings.Contains(output, "must-not-appear") {
+		t.Fatalf("log output leaked a query string: %q", output)
 	}
 }
 

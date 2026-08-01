@@ -59,11 +59,11 @@ func (c ClickHouseConfig) Validate() error {
 		return fmt.Errorf("clickhouse.address must be host:port without a URL scheme")
 	}
 	if strings.ContainsAny(address, "/?@") {
-		return fmt.Errorf("clickhouse.address must be a host:port: %q", address)
+		return fmt.Errorf("clickhouse.address must be a host:port")
 	}
 	host, port, err := net.SplitHostPort(address)
 	if err != nil || strings.TrimSpace(host) == "" || strings.ContainsAny(host, "/@?") {
-		return fmt.Errorf("clickhouse.address must be a host:port: %q", address)
+		return fmt.Errorf("clickhouse.address must be a host:port")
 	}
 	portNumber, err := strconv.Atoi(port)
 	if err != nil || portNumber < 1 || portNumber > 65535 {

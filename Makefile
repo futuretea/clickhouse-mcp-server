@@ -18,8 +18,7 @@ test:
 	go test ./...
 
 test-integration:
-	test -n "$(MCP_CLICKHOUSE_ADDRESS)"
-	go test -count=1 -tags=integration ./cmd/mcp-server ./pkg/toolset/clickhouse ./internal/cmd
+	./scripts/test-integration.sh
 
 test-template-init:
 	./scripts/test-init-template.sh

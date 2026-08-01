@@ -24,3 +24,5 @@ Configure an MCP client that supports stdio with npm:
 ```
 
 Supported release platforms are recorded in `.github/ci/release-platforms.json`.
+
+Before publishing, set the repository variable `NPM_REGISTRY_URL` to the target npm registry URL and set `NPM_TOKEN` with publish permission for that registry.

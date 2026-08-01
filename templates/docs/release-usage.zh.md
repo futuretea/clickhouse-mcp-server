@@ -24,3 +24,5 @@ docker run --rm -i <image>:v<version>
 ```
 
 支持的发布平台记录在 `.github/ci/release-platforms.json`。
+
+发布前，设置仓库变量 `NPM_REGISTRY_URL` 为目标 npm registry URL，并设置对该 registry 有发布权限的 `NPM_TOKEN`。

@@ -30,9 +30,45 @@ assert_not_contains() {
 }
 
 copy_template() {
-  local destination=$1
-  mkdir -p "$destination"
-  cp -R "$template_root"/. "$destination"
+	local destination=$1
+	mkdir -p "$destination"
+	cp -R "$template_root"/. "$destination"
+}
+
+replace_literal() {
+	local source_value=$1
+	local target_value=$2
+	shift 2
+	SOURCE_VALUE="$source_value" TARGET_VALUE="$target_value" \
+		perl -pi -e 's/\Q$ENV{SOURCE_VALUE}\E/$ENV{TARGET_VALUE}/g' "$@"
+}
+
+prepare_uninitialized_template() {
+	local destination=$1
+	local module=''
+	local binary=''
+	local image=''
+	local -a go_files=()
+
+	copy_template "$destination"
+	rm -rf -- "$destination/.github" "$destination/npm" "$destination/release.mk"
+
+	module=$(awk '$1 == "module" { print $2; exit }' "$destination/go.mod")
+	binary=$(awk '$1 == "BINARY_NAME" { print $3; exit }' "$destination/Makefile")
+	image=$(awk '$1 == "-t" { sub(/:.*/, "", $2); print $2; exit }' "$destination/Makefile")
+	[ -n "$module" ] && [ -n "$binary" ] && [ -n "$image" ] || fail 'could not derive template fixture placeholders'
+
+	while IFS= read -r file; do
+		go_files+=("$file")
+	done < <(find "$destination"/cmd "$destination"/internal "$destination"/pkg -type f -name '*.go' -print)
+
+	replace_literal "$module" 'example.invalid/mcp-template-module-placeholder' \
+		"$destination/go.mod" "$destination/Makefile" "$destination/Dockerfile" \
+		"$destination/README.md" "$destination/README.zh.md" "${go_files[@]}"
+	replace_literal "$image:" 'mcp-template-image-placeholder:' "$destination/Makefile"
+	replace_literal "$binary" 'mcp-template-binary-placeholder' \
+		"$destination/Makefile" "$destination/Dockerfile" "$destination/README.md" \
+		"$destination/README.zh.md" "${go_files[@]}"
 }
 
 initialize() {
@@ -68,7 +104,7 @@ assert_not_ignored() {
 }
 
 ghcr_template="$test_root/ghcr"
-copy_template "$ghcr_template"
+prepare_uninitialized_template "$ghcr_template"
 initialize "$ghcr_template" example.com/ghcr-check ghcr-check @acme/ghcr-check ghcr.io/acme/ghcr-check --with-release --use-ghcr
 
 ghcr_workflow="$ghcr_template/.github/workflows/release-docker.yaml"
@@ -85,12 +121,32 @@ release_line=$(grep -n '^  release:$' "$ghcr_workflow" | cut -d: -f1)
 packages_line=$(grep -n '^      packages: write$' "$ghcr_workflow" | cut -d: -f1)
 [ "$packages_line" -gt "$release_line" ] || fail 'expected packages: write to belong to the release job'
 
+build_workflow="$ghcr_template/.github/workflows/build.yaml"
+assert_contains '        run: ./bin/${BINARY_NAME} version' "$build_workflow"
+assert_not_contains '          ./bin/${BINARY_NAME} tools list' "$build_workflow"
+assert_contains '        run: go test -race ./...' "$build_workflow"
+assert_contains '        run: make test-template-init' "$build_workflow"
+
+npm_workflow="$ghcr_template/.github/workflows/release-npm.yaml"
+assert_contains '  validate-release:' "$npm_workflow"
+assert_contains '    needs: [resolve-platforms, validate-tag, validate-release]' "$npm_workflow"
+assert_contains '    needs: [validate-tag, validate-release, build-platform]' "$npm_workflow"
+assert_contains '          registry-url: ${{ vars.NPM_REGISTRY_URL }}' "$npm_workflow"
+assert_contains '          NPM_REGISTRY_URL: ${{ vars.NPM_REGISTRY_URL }}' "$npm_workflow"
+assert_contains '    needs: [resolve-platforms, validate-tag, validate-release]' "$ghcr_workflow"
+if grep -Eq '^[[:space:]]*uses: [^@]+@v[0-9]' "$npm_workflow" "$ghcr_workflow"; then
+	fail 'expected generated release workflows to pin every action by commit SHA'
+fi
+if grep -Eq '^[[:space:]]*uses: [^@]+@v[0-9]' "$build_workflow"; then
+	fail 'expected generated build workflow to pin every action by commit SHA'
+fi
+
 assert_ignored "$ghcr_template" bin/ghcr-check
 assert_ignored "$ghcr_template" .auto-runs/report.md
 assert_not_ignored "$ghcr_template" npm/acme-ghcr-check/bin/index.js
 
 generic_template="$test_root/generic"
-copy_template "$generic_template"
+prepare_uninitialized_template "$generic_template"
 initialize "$generic_template" example.com/generic-check generic-check @acme/generic-check docker.io/acme/generic-check --with-release
 
 generic_workflow="$generic_template/.github/workflows/release-docker.yaml"
@@ -99,10 +155,11 @@ assert_contains '          username: ${{ secrets.DOCKER_USERNAME }}' "$generic_w
 assert_contains '          password: ${{ secrets.DOCKER_PASSWORD }}' "$generic_workflow"
 assert_not_contains '          username: ${{ github.actor }}' "$generic_workflow"
 assert_not_contains '          password: ${{ secrets.GITHUB_TOKEN }}' "$generic_workflow"
+assert_contains '  validate-release:' "$generic_workflow"
 assert_not_ignored "$generic_template" npm/acme-generic-check/bin/index.js
 
 invalid_template="$test_root/invalid"
-copy_template "$invalid_template"
+prepare_uninitialized_template "$invalid_template"
 if initialize "$invalid_template" example.com/missing-release missing-release @acme/missing-release ghcr.io/acme/missing-release --use-ghcr --dry-run >"$test_root/missing-release.out" 2>&1; then
   fail 'expected --use-ghcr without --with-release to fail'
 fi

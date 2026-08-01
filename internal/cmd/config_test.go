@@ -197,6 +197,32 @@ func TestConfigCheckRejectsMissingOrCredentialBearingAddressWithoutLeaking(t *te
 	})
 }
 
+func TestCommandsRejectCredentialBearingAddressWithoutLeaking(t *testing.T) {
+	const (
+		username = "address-user"
+		password = "address /?@: password"
+	)
+	forms := []string{
+		password,
+		url.QueryEscape(password),
+		url.PathEscape(password),
+		url.UserPassword(username, password).String(),
+	}
+	for _, form := range forms {
+		t.Run(form, func(t *testing.T) {
+			clearConfigEnvironment(t)
+			setConfigCheckAddress(t, username+":"+form+"@localhost:8123")
+			for _, args := range [][]string{{"mcp"}, {"tools", "list"}} {
+				out, errOut, err := runCommand(t, args...)
+				if err == nil || !strings.Contains(err.Error(), "clickhouse.address") {
+					t.Fatalf("%v error = %v, want invalid address error", args, err)
+				}
+				assertNoCredentialForms(t, err, out, errOut, username, password)
+			}
+		})
+	}
+}
+
 func TestSafeSSEBaseURLRedactsCredentialsWithoutMutatingConfig(t *testing.T) {
 	const username = "sse-user"
 	const password = "SSE password"
@@ -516,6 +542,11 @@ func credentialBearingURL(username, password string) string {
 }
 
 func runConfigCheck(t *testing.T, args ...string) (string, string, error) {
+	t.Helper()
+	return runCommand(t, args...)
+}
+
+func runCommand(t *testing.T, args ...string) (string, string, error) {
 	t.Helper()
 	var out bytes.Buffer
 	var errOut bytes.Buffer

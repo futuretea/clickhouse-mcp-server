@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"reflect"
+	"sort"
 	"strings"
 )
 
@@ -72,8 +73,16 @@ func scannedValue(destination any) any {
 func (t *Toolset) queryError(operation string, err error) error {
 	message := err.Error()
 	if t.password != "" {
-		message = strings.ReplaceAll(message, t.password, "[redacted]")
-		message = strings.ReplaceAll(message, url.QueryEscape(t.password), "[redacted]")
+		forms := []string{
+			t.password,
+			url.QueryEscape(t.password),
+			url.PathEscape(t.password),
+			url.UserPassword("", t.password).String(),
+		}
+		sort.Slice(forms, func(i, j int) bool { return len(forms[i]) > len(forms[j]) })
+		for _, form := range forms {
+			message = strings.ReplaceAll(message, form, "[redacted]")
+		}
 	}
 	return fmt.Errorf("ClickHouse %s failed at %s (database %q): %s; check clickhouse.address, clickhouse.secure, clickhouse.database, and the SQL", operation, t.address, t.database, message)
 }

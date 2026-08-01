@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"reflect"
 	"sort"
 	"strings"
@@ -189,13 +190,40 @@ func TestValidateSingleStatement(t *testing.T) {
 	}
 }
 
-func TestQueryErrorDoesNotExposePassword(t *testing.T) {
-	password := "redaction-value"
-	client := &fakeClient{err: fmt.Errorf("request to http://alice:%s@localhost:8123 failed", password)}
-	handler := handlersByName(newToolsetWithClient("localhost:8123", "default", password, client).GetTools())["clickhouse_query"]
-	_, err := handler(t.Context(), map[string]any{"query": "SELECT 1"})
-	if err == nil || strings.Contains(err.Error(), password) || !strings.Contains(err.Error(), "[redacted]") {
-		t.Fatalf("error = %v", err)
+func TestQueryErrorsRedactPasswordForms(t *testing.T) {
+	const (
+		username = "alice"
+		password = "redaction /?@:"
+	)
+	forms := []string{
+		password,
+		url.QueryEscape(password),
+		url.PathEscape(password),
+		url.UserPassword(username, password).String(),
+	}
+	connectionError := fmt.Errorf("request to http://%s@localhost:8123 failed", url.UserPassword(username, password))
+	tests := []struct {
+		name   string
+		client *fakeClient
+	}{
+		{name: "query", client: &fakeClient{err: connectionError}},
+		{name: "scan", client: &fakeClient{responses: []fakeResponse{{columns: []string{"value"}, rows: [][]any{{1}}, scanErr: connectionError}}}},
+		{name: "cursor", client: &fakeClient{responses: []fakeResponse{{columns: []string{"value"}, rowErr: connectionError}}}},
+	}
+
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			handler := handlersByName(newToolsetWithClient("localhost:8123", "default", password, testCase.client).GetTools())["clickhouse_query"]
+			_, err := handler(t.Context(), map[string]any{"query": "SELECT 1"})
+			if err == nil || !strings.Contains(err.Error(), "[redacted]") {
+				t.Fatalf("error = %v", err)
+			}
+			for _, form := range forms {
+				if strings.Contains(err.Error(), form) {
+					t.Errorf("error leaked password form %q: %v", form, err)
+				}
+			}
+		})
 	}
 }
 
@@ -229,6 +257,8 @@ type fakeResponse struct {
 	columns []string
 	rows    [][]any
 	err     error
+	scanErr error
+	rowErr  error
 }
 
 type queryCall struct {
@@ -256,7 +286,7 @@ func (c *fakeClient) Query(_ context.Context, query string, parameters map[strin
 	if response.err != nil {
 		return nil, response.err
 	}
-	rows := &fakeRows{columns: response.columns, values: response.rows, position: -1}
+	rows := &fakeRows{columns: response.columns, values: response.rows, position: -1, scanErr: response.scanErr, rowErr: response.rowErr}
 	c.rows = append(c.rows, rows)
 	return rows, nil
 }
@@ -267,6 +297,8 @@ type fakeRows struct {
 	position  int
 	nextCalls int
 	scanCalls int
+	scanErr   error
+	rowErr    error
 }
 
 func (r *fakeRows) Columns() []string       { return append([]string(nil), r.columns...) }
@@ -280,6 +312,9 @@ func (r *fakeRows) Next() bool {
 
 func (r *fakeRows) Scan(destinations ...any) error {
 	r.scanCalls++
+	if r.scanErr != nil {
+		return r.scanErr
+	}
 	if r.position < 0 || r.position >= len(r.values) || len(destinations) != len(r.values[r.position]) {
 		return errors.New("invalid fake scan")
 	}
@@ -293,5 +328,5 @@ func (r *fakeRows) Scan(destinations ...any) error {
 	return nil
 }
 
-func (*fakeRows) Err() error   { return nil }
+func (r *fakeRows) Err() error { return r.rowErr }
 func (*fakeRows) Close() error { return nil }

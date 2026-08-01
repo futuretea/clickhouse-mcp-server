@@ -38,6 +38,41 @@ func TestIntegrationReadOnlyClickHouse(t *testing.T) {
 		t.Fatal("list databases returned no databases")
 	}
 
+	tables, err := handlers["clickhouse_list_tables"](t.Context(), map[string]any{"database": "system"})
+	if err != nil {
+		t.Fatalf("list system tables: %v", err)
+	}
+	var tableResult struct {
+		Database string `json:"database"`
+		Tables   []struct {
+			Name string `json:"name"`
+		} `json:"tables"`
+	}
+	if err := json.Unmarshal([]byte(tables), &tableResult); err != nil {
+		t.Fatalf("decode system tables: %v", err)
+	}
+	if tableResult.Database != "system" || len(tableResult.Tables) == 0 {
+		t.Fatalf("unexpected system tables result: %s", tables)
+	}
+
+	description, err := handlers["clickhouse_describe_table"](t.Context(), map[string]any{"database": "system", "table": "tables"})
+	if err != nil {
+		t.Fatalf("describe system.tables: %v", err)
+	}
+	var descriptionResult struct {
+		Database string `json:"database"`
+		Table    string `json:"table"`
+		Columns  []struct {
+			Name string `json:"name"`
+		} `json:"columns"`
+	}
+	if err := json.Unmarshal([]byte(description), &descriptionResult); err != nil {
+		t.Fatalf("decode system.tables description: %v", err)
+	}
+	if descriptionResult.Database != "system" || descriptionResult.Table != "tables" || len(descriptionResult.Columns) == 0 {
+		t.Fatalf("unexpected system.tables description: %s", description)
+	}
+
 	query, err := handlers["clickhouse_query"](t.Context(), map[string]any{"query": "SELECT 1 AS value"})
 	if err != nil {
 		t.Fatalf("SELECT query: %v", err)
