@@ -71,18 +71,40 @@ clickhouse:
   password: ""
 ```
 
-| YAML 键 | 环境变量 | 默认值 | 含义 |
-|----------|----------|--------|------|
-| `clickhouse.address` | `MCP_CLICKHOUSE_ADDRESS` | 无 | 必填的 ClickHouse `host:port` 地址 |
-| `clickhouse.database` | `MCP_CLICKHOUSE_DATABASE` | `default` | 表工具使用的默认数据库 |
-| `clickhouse.secure` | `MCP_CLICKHOUSE_SECURE` | `false` | 对 ClickHouse 使用 HTTPS 而非 HTTP |
-| `clickhouse.username` | `MCP_CLICKHOUSE_USERNAME` | 空 | 可选 ClickHouse 用户名 |
-| `clickhouse.password` | `MCP_CLICKHOUSE_PASSWORD` | 空 | 可选 ClickHouse 密码 |
-| `port` | `MCP_PORT` | `0` | HTTP 端口；`0` 启动 stdio 模式 |
-| `listen` | `MCP_LISTEN` | `127.0.0.1` | HTTP 监听地址 |
-| `log_level` | `MCP_LOG_LEVEL` | `info` | 服务日志级别 |
+| 分组 | YAML 键 | 环境变量 | 默认值 | 含义 |
+|------|----------|----------|--------|------|
+| ClickHouse 连接 | `clickhouse.address` | `MCP_CLICKHOUSE_ADDRESS` | 无 | 必填的 ClickHouse `host:port` 地址 |
+| ClickHouse 连接 | `clickhouse.database` | `MCP_CLICKHOUSE_DATABASE` | `default` | 表工具使用的默认数据库 |
+| ClickHouse 连接 | `clickhouse.secure` | `MCP_CLICKHOUSE_SECURE` | `false` | 对 ClickHouse 使用 HTTPS 而非 HTTP |
+| ClickHouse 连接 | `clickhouse.username` | `MCP_CLICKHOUSE_USERNAME` | 空 | 可选 ClickHouse 用户名 |
+| ClickHouse 连接 | `clickhouse.password` | `MCP_CLICKHOUSE_PASSWORD` | 空 | 可选 ClickHouse 密码 |
+| 服务运行 | `port` | `MCP_PORT` | `0` | HTTP 端口；`0` 启动 stdio 模式 |
+| 服务运行 | `listen` | `MCP_LISTEN` | `127.0.0.1` | HTTP 监听地址 |
+| 服务运行 | `sse_base_url` | `MCP_SSE_BASE_URL` | 空 | 兼容 SSE message 端点的公开基础 URL |
+| 服务运行 | `log_level` | `MCP_LOG_LEVEL` | `info` | 服务日志级别 |
+| 工具筛选 | `enabled_tools` | `MCP_ENABLED_TOOLS` | 空 | 以逗号分隔的允许工具名 |
+| 工具筛选 | `disabled_tools` | `MCP_DISABLED_TOOLS` | 空 | 以逗号分隔的禁止工具名 |
+| 工具筛选 | `enabled_domains` | `MCP_ENABLED_DOMAINS` | 空 | 以逗号分隔的允许工具域 |
+| 工具筛选 | `disabled_domains` | `MCP_DISABLED_DOMAINS` | 空 | 以逗号分隔的禁止工具域 |
 
 服务不会记录配置的密码。`secure: true` 只保护到 ClickHouse 的连接；它不会为 MCP HTTP 端点增加 TLS 或认证。
+
+### 仅用环境变量检查配置
+
+最小本地路径只需要设置 ClickHouse HTTP 地址，然后查看生效配置。该命令不会启动 MCP，也不会访问网络。
+
+```bash
+export MCP_CLICKHOUSE_ADDRESS=127.0.0.1:8123
+./bin/clickhouse-mcp-server config check
+```
+
+命令按稳定顺序输出 13 个配置字段及其来源（`flag`、`environment`、`YAML` 或 `default`）。密码只显示 `set` 或 `unset`；`sse_base_url` 在显示前会删除 query 和 fragment，并脱敏 URL userinfo。
+
+只有明确需要一次 ClickHouse HTTP(S) `Ping` 时才追加 `--connect`。它会打开、Ping 并关闭一个短生命周期连接，不会启动 MCP 服务。
+
+```bash
+./bin/clickhouse-mcp-server config check --connect
+```
 
 ## CLI
 
@@ -148,7 +170,7 @@ MCP_CLICKHOUSE_ADDRESS=127.0.0.1:8123 make test-integration
 docker stop clickhouse-mcp-integration
 ```
 
-若隔离 ClickHouse 使用其他配置，可设置 `MCP_CLICKHOUSE_DATABASE`、`MCP_CLICKHOUSE_SECURE`、`MCP_CLICKHOUSE_USERNAME` 和 `MCP_CLICKHOUSE_PASSWORD`。缺少 `MCP_CLICKHOUSE_ADDRESS` 时目标会失败，不会静默跳过集成检查。
+若隔离 ClickHouse 使用其他配置，可设置 `MCP_CLICKHOUSE_DATABASE`、`MCP_CLICKHOUSE_SECURE`、`MCP_CLICKHOUSE_USERNAME` 和 `MCP_CLICKHOUSE_PASSWORD`。该目标会同时运行只读工具集集成测试和 `config check --connect`；缺少 `MCP_CLICKHOUSE_ADDRESS` 时会失败，不会静默跳过集成检查。
 
 仓库仍保留 `scripts/` 和 `templates/` 中的模板资产供本地参考；它们不属于 ClickHouse server 的运行时部分。
 

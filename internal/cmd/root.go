@@ -38,6 +38,7 @@ func NewRootCommand(streams IOStreams) *cobra.Command {
 	command.SetErr(streams.ErrOut)
 
 	addCommonFlags(command, &cfgFile)
+	command.AddCommand(newConfigCommand(streams, &cfgFile, v))
 	command.AddCommand(newMCPCommand(streams, &cfgFile, v))
 	command.AddCommand(newToolsCommand(streams, &cfgFile, v))
 	command.AddCommand(newVersionCommand(streams))
