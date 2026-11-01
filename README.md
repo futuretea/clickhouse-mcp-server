@@ -97,9 +97,9 @@ After the process connects, and before any tool runs a query, startup reads `SHO
 
 - `ACCESS MANAGEMENT`, or a privilege in that group, including `CREATE USER`, `ALTER USER`, `DROP USER`, `CREATE ROLE`, `DROP ROLE`, `ROLE ADMIN`, row policies, quotas, settings profiles, and `SHOW ACCESS`
 - `SYSTEM`, or any `SYSTEM …` privilege, such as `SYSTEM SHUTDOWN`
-- `SOURCES`, `READ`, `WRITE`, or an external source privilege such as `FILE`, `URL`, `REMOTE`, or `S3`
-- global DDL or global `ALL` / `ALL PRIVILEGES` on `*.*`: `CREATE`, `ALTER`, `DROP`, `TRUNCATE`, `OPTIMIZE`, and their DDL children
-- similar administrative grants: `BACKUP`, `KILL QUERY`, `KILL TRANSACTION`, `MOVE PARTITION BETWEEN SHARDS`, `TABLE ENGINE`, `CLUSTER`, `NAMED COLLECTION ADMIN` (including named-collection secrets), `SET DEFINER`, and `ALLOW SQL SECURITY NONE`
+- `SOURCES`, `READ`, `WRITE`, or an external source privilege such as `FILE`, `URL`, `REMOTE`, `S3`, `YTSAURUS`, or `ARROW FLIGHT`
+- global DDL or global `ALL` / `ALL PRIVILEGES` on `*.*`: `CREATE`, `ALTER`, `DROP`, `TRUNCATE`, `OPTIMIZE`, and their DDL children, including `ALTER HANDLER`
+- similar administrative grants: `BACKUP`, `KILL QUERY`, `KILL TRANSACTION`, `MOVE PARTITION BETWEEN SHARDS`, `TABLE ENGINE`, `CLUSTER`, `NAMED COLLECTION ADMIN` (including named-collection secrets), `SET DEFINER`, `ALLOW SQL SECURITY NONE`, `SHOW CONNECTIONS`, and `SHOW HANDLERS`
 
 An account limited to `SELECT` and `SHOW` starts with the default configuration. No opt-out is required. DDL granted on one database, rather than on `*.*`, is not treated as a dangerous service role. Queries are still sent with `readonly=1`.
 

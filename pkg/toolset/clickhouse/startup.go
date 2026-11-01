@@ -94,6 +94,19 @@ var alwaysUnsafePrivilegeNames = []string{
 	"S3",
 	"SQLITE",
 	"URL",
+	// Current servers still grant these sources as their own privileges when
+	// read/write source grants are disabled. SHOW GRANTS prints ARROW_FLIGHT
+	// as "ARROW FLIGHT"; the other spellings are accepted aliases.
+	"YTSAURUS",
+	"ARROW FLIGHT",
+	"ARROW_FLIGHT",
+	"ARROWFLIGHT",
+	// Global visibility privileges. readonly=1 does not hide other users'
+	// connections or SQL HTTP handlers.
+	"SHOW CONNECTIONS",
+	"SHOW CONNECTION",
+	"SHOW HANDLERS",
+	"SHOW HANDLER",
 	"SHUTDOWN",
 	"BACKUP",
 	"KILL QUERY",
@@ -181,6 +194,7 @@ var globalDDLPrivilegeNames = []string{
 	"ALTER VIEW REFRESH",
 	"ALTER VIEW MODIFY REFRESH",
 	"ALTER VIEW MODIFY SQL SECURITY",
+	"ALTER HANDLER",
 	"ALTER UPDATE",
 	"ALTER DELETE",
 	"DROP",
