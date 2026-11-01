@@ -66,6 +66,20 @@ func (c *driverClient) Query(ctx context.Context, query string, parameters map[s
 	return &driverCursor{rows: rows}, nil
 }
 
+// queryRaw runs a startup probe without the read-only setting applied to tool
+// queries. SHOW GRANTS must succeed for a least-privilege account, and the
+// privilege decision must not depend on readonly=1.
+func (c *driverClient) queryRaw(ctx context.Context, query string, parameters map[string]string) (RowCursor, error) {
+	if len(parameters) > 0 {
+		ctx = ch.Context(ctx, ch.WithParameters(ch.Parameters(parameters)))
+	}
+	rows, err := c.connection.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	return &driverCursor{rows: rows}, nil
+}
+
 func (c *driverClient) Close() error {
 	return c.connection.Close()
 }

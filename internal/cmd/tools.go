@@ -107,7 +107,19 @@ func newToolsCallCommand(streams IOStreams, cfgFile *string, v *viper.Viper) *co
 			if err != nil {
 				return err
 			}
-			tools, err := buildToolCatalog(cfg)
+			catalog, err := buildToolCatalog(cfg)
+			if err != nil {
+				return err
+			}
+			if _, ok := findTool(catalog, args[0]); !ok {
+				return fmt.Errorf("unknown tool %q; run 'clickhouse-mcp-server tools list' to see available tools", args[0])
+			}
+			toolsets, err := runtimeToolsets(cmd.Context(), cfg)
+			if err != nil {
+				return err
+			}
+			defer closeToolsets(toolsets)
+			tools, err := buildToolCatalogForToolsets(cfg, toolsets)
 			if err != nil {
 				return err
 			}

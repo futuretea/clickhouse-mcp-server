@@ -96,9 +96,19 @@ func TestIntegrationMCPHTTP(t *testing.T) {
 	if mutation.Error != nil {
 		t.Fatalf("temporary DDL protocol error: %s", mutation.Error.Message)
 	}
-	if !mutation.Result.IsError || !strings.Contains(strings.ToLower(mutation.Result.text()), "readonly") {
-		t.Fatalf("temporary DDL result = %+v, want a readonly error", mutation.Result)
+	// CREATE TEMPORARY TABLE is global-only. Granting it on *.* is rejected at
+	// startup, so this SELECT/SHOW account is denied the privilege (code 497)
+	// rather than reaching the readonly=1 check.
+	if !mutation.Result.IsError || !temporaryDDLDenied(mutation.Result.text()) {
+		t.Fatalf("temporary DDL result = %+v, want ClickHouse ACCESS_DENIED for CREATE TEMPORARY TABLE", mutation.Result)
 	}
+}
+
+func temporaryDDLDenied(message string) bool {
+	text := strings.ToLower(message)
+	return strings.Contains(text, "access_denied") &&
+		strings.Contains(text, "code: 497") &&
+		strings.Contains(text, "create temporary table")
 }
 
 func buildServerBinary(t *testing.T) string {

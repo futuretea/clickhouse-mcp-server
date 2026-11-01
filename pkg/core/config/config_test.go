@@ -1,6 +1,8 @@
 package config_test
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -28,6 +30,71 @@ func TestLoadConfigDefaults(t *testing.T) {
 	if cfg.ClickHouse.Database != "default" || cfg.ClickHouse.Secure {
 		t.Fatalf("unexpected ClickHouse defaults: %+v", cfg.ClickHouse)
 	}
+	if cfg.AllowUnsafeDatabaseRole {
+		t.Fatal("allow_unsafe_database_role default = true, want false")
+	}
+}
+
+func TestLoadConfigAllowUnsafeDatabaseRole(t *testing.T) {
+	t.Run("environment true", func(t *testing.T) {
+		t.Setenv("MCP_ALLOW_UNSAFE_DATABASE_ROLE", "true")
+		v := viper.New()
+		v.Set("clickhouse.address", "127.0.0.1:8123")
+		cfg, err := config.LoadConfig("", v)
+		if err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		if !cfg.AllowUnsafeDatabaseRole {
+			t.Fatal("allow_unsafe_database_role = false, want true from MCP_ALLOW_UNSAFE_DATABASE_ROLE")
+		}
+	})
+
+	t.Run("environment false overrides yaml", func(t *testing.T) {
+		t.Setenv("MCP_ALLOW_UNSAFE_DATABASE_ROLE", "false")
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		contents := "allow_unsafe_database_role: true\nclickhouse:\n  address: 127.0.0.1:8123\n"
+		if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+		cfg, err := config.LoadConfig(path, viper.New())
+		if err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		if cfg.AllowUnsafeDatabaseRole {
+			t.Fatal("environment false did not override YAML true")
+		}
+	})
+
+	t.Run("yaml true", func(t *testing.T) {
+		unsetEnv(t, "MCP_ALLOW_UNSAFE_DATABASE_ROLE")
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		contents := "allow_unsafe_database_role: true\nclickhouse:\n  address: 127.0.0.1:8123\n"
+		if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+		cfg, err := config.LoadConfig(path, viper.New())
+		if err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		if !cfg.AllowUnsafeDatabaseRole {
+			t.Fatal("allow_unsafe_database_role = false, want true from YAML")
+		}
+	})
+}
+
+func unsetEnv(t *testing.T, key string) {
+	t.Helper()
+	value, existed := os.LookupEnv(key)
+	if err := os.Unsetenv(key); err != nil {
+		t.Fatalf("unset %s: %v", key, err)
+	}
+	t.Cleanup(func() {
+		if existed {
+			_ = os.Setenv(key, value)
+			return
+		}
+		_ = os.Unsetenv(key)
+	})
 }
 
 func TestLoadConfigRequiresClickHouseAddress(t *testing.T) {
