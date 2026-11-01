@@ -12,3 +12,4 @@ clickhouse:
   secure: false
   username: ""
   password: ""
+allow_unsafe_database_role: false

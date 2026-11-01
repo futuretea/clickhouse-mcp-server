@@ -21,6 +21,10 @@ type StaticConfig struct {
 	EnabledDomains  []string         `mapstructure:"enabled_domains"`
 	DisabledDomains []string         `mapstructure:"disabled_domains"`
 	ClickHouse      ClickHouseConfig `mapstructure:"clickhouse"`
+
+	// AllowUnsafeDatabaseRole skips only the startup service-account privilege
+	// rejection. Connection and grant-probe failures still abort startup.
+	AllowUnsafeDatabaseRole bool `mapstructure:"allow_unsafe_database_role"`
 }
 
 // ClickHouseConfig contains the HTTP(S) connection settings for ClickHouse.
@@ -87,19 +91,20 @@ func LoadConfig(configPath string, v *viper.Viper) (*StaticConfig, error) {
 	}
 
 	defaults := map[string]any{
-		"port":                0,
-		"listen":              "127.0.0.1",
-		"sse_base_url":        "",
-		"log_level":           "info",
-		"enabled_tools":       []string{},
-		"disabled_tools":      []string{},
-		"enabled_domains":     []string{},
-		"disabled_domains":    []string{},
-		"clickhouse.address":  "",
-		"clickhouse.database": "default",
-		"clickhouse.secure":   false,
-		"clickhouse.username": "",
-		"clickhouse.password": "",
+		"port":                       0,
+		"listen":                     "127.0.0.1",
+		"sse_base_url":               "",
+		"log_level":                  "info",
+		"enabled_tools":              []string{},
+		"disabled_tools":             []string{},
+		"enabled_domains":            []string{},
+		"disabled_domains":           []string{},
+		"clickhouse.address":         "",
+		"clickhouse.database":        "default",
+		"clickhouse.secure":          false,
+		"clickhouse.username":        "",
+		"clickhouse.password":        "",
+		"allow_unsafe_database_role": false,
 	}
 	for key, value := range defaults {
 		v.SetDefault(key, value)

@@ -17,7 +17,7 @@ func TestIntegrationReadOnlyClickHouse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load integration configuration: %v", err)
 	}
-	toolset, err := NewToolset(cfg.ClickHouse)
+	toolset, err := NewToolset(t.Context(), cfg.ClickHouse, cfg.AllowUnsafeDatabaseRole)
 	if err != nil {
 		t.Fatalf("create ClickHouse toolset: %v", err)
 	}

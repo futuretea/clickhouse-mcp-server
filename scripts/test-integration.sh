@@ -19,6 +19,25 @@ cleanup() {
 }
 trap cleanup EXIT
 
+clickhouse_exec() {
+  local sql="$1"
+  local response_file
+  response_file=$(mktemp)
+  local code
+  code=$(curl --silent --show-error --output "$response_file" --write-out '%{http_code}' "http://127.0.0.1:${port}/" --data-binary "$sql") || {
+    rm -f "$response_file"
+    printf '%s\n' 'error: ClickHouse privilege setup request failed' >&2
+    return 1
+  }
+  if [ "$code" != "200" ]; then
+    printf '%s\n' "error: ClickHouse privilege setup failed (${code})" >&2
+    cat "$response_file" >&2 || true
+    rm -f "$response_file"
+    return 1
+  fi
+  rm -f "$response_file"
+}
+
 docker run --detach --rm --name "$container_name" \
   -e CLICKHOUSE_SKIP_USER_SETUP=1 \
   -p 127.0.0.1::8123 \
@@ -32,7 +51,10 @@ fi
 
 for _ in $(seq 1 45); do
   if curl --fail --silent --show-error "http://127.0.0.1:$port/ping" >/dev/null; then
+    clickhouse_exec "CREATE USER IF NOT EXISTS mcp_reader IDENTIFIED WITH no_password"
+    clickhouse_exec "GRANT SELECT, SHOW ON *.* TO mcp_reader"
     MCP_CLICKHOUSE_ADDRESS="127.0.0.1:$port" \
+      MCP_CLICKHOUSE_USERNAME="mcp_reader" \
       go test -count=1 -tags=integration ./cmd/mcp-server ./pkg/toolset/clickhouse ./internal/cmd
     exit 0
   fi

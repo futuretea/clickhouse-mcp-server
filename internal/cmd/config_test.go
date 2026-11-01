@@ -33,6 +33,7 @@ func TestConfigCheckDisplaysEnvironmentValuesAndSources(t *testing.T) {
 	t.Setenv("MCP_DISABLED_TOOLS", "disabled_environment_tool")
 	t.Setenv("MCP_ENABLED_DOMAINS", "environment_domain")
 	t.Setenv("MCP_DISABLED_DOMAINS", "disabled_environment_domain")
+	t.Setenv("MCP_ALLOW_UNSAFE_DATABASE_ROLE", "true")
 
 	out, errOut, err := runConfigCheck(t, "config", "check")
 	if err != nil {
@@ -53,6 +54,7 @@ func TestConfigCheckDisplaysEnvironmentValuesAndSources(t *testing.T) {
 		{"disabled_tools", "disabled_environment_tool", "environment"},
 		{"enabled_domains", "environment_domain", "environment"},
 		{"disabled_domains", "disabled_environment_domain", "environment"},
+		{"allow_unsafe_database_role", "true", "environment"},
 	})
 	assertNoCredentialForms(t, err, out, errOut, "environment_user", "environment password")
 }
@@ -74,6 +76,7 @@ enabled_tools: [yaml_tool]
 disabled_tools: [yaml_disabled_tool]
 enabled_domains: [yaml_domain]
 disabled_domains: [yaml_disabled_domain]
+allow_unsafe_database_role: true
 `)
 
 	out, errOut, err := runConfigCheck(t, "--config", configPath, "config", "check")
@@ -95,6 +98,7 @@ disabled_domains: [yaml_disabled_domain]
 		{"disabled_tools", "yaml_disabled_tool", "YAML"},
 		{"enabled_domains", "yaml_domain", "YAML"},
 		{"disabled_domains", "yaml_disabled_domain", "YAML"},
+		{"allow_unsafe_database_role", "true", "YAML"},
 	})
 	assertLineContains(t, out, configPath, "source", "flag")
 	assertNoCredentialForms(t, err, out, errOut, "yaml_user", "yaml password")
@@ -123,6 +127,7 @@ func TestConfigCheckDisplaysDefaultsAndDatabaseFallbackSources(t *testing.T) {
 			{"disabled_tools", "", "default"},
 			{"enabled_domains", "", "default"},
 			{"disabled_domains", "", "default"},
+			{"allow_unsafe_database_role", "false", "default"},
 		})
 		assertLineContains(t, out, "config", "source", "default")
 	})
@@ -511,6 +516,7 @@ func clearConfigEnvironment(t *testing.T) {
 		"MCP_CLICKHOUSE_ADDRESS", "MCP_CLICKHOUSE_DATABASE", "MCP_CLICKHOUSE_SECURE", "MCP_CLICKHOUSE_USERNAME", "MCP_CLICKHOUSE_PASSWORD",
 		"MCP_PORT", "MCP_LISTEN", "MCP_SSE_BASE_URL", "MCP_LOG_LEVEL",
 		"MCP_ENABLED_TOOLS", "MCP_DISABLED_TOOLS", "MCP_ENABLED_DOMAINS", "MCP_DISABLED_DOMAINS",
+		"MCP_ALLOW_UNSAFE_DATABASE_ROLE",
 	} {
 		t.Setenv(key, "")
 	}

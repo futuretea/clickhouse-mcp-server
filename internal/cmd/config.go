@@ -94,6 +94,7 @@ func configCheckFields(cmd *cobra.Command, v *viper.Viper, cfg *config.StaticCon
 		{name: "disabled_tools", value: strings.Join(cfg.DisabledTools, ","), source: configValueSource(cmd, v, "disabled_tools", "MCP_DISABLED_TOOLS", "")},
 		{name: "enabled_domains", value: strings.Join(cfg.EnabledDomains, ","), source: configValueSource(cmd, v, "enabled_domains", "MCP_ENABLED_DOMAINS", "")},
 		{name: "disabled_domains", value: strings.Join(cfg.DisabledDomains, ","), source: configValueSource(cmd, v, "disabled_domains", "MCP_DISABLED_DOMAINS", "")},
+		{name: "allow_unsafe_database_role", value: strconv.FormatBool(cfg.AllowUnsafeDatabaseRole), source: configValueSource(cmd, v, "allow_unsafe_database_role", "MCP_ALLOW_UNSAFE_DATABASE_ROLE", "")},
 	}
 	for index := range fields {
 		if fields[index].name == "clickhouse.password_status" {

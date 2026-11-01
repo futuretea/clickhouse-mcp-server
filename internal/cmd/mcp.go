@@ -70,7 +70,7 @@ func runServer(ctx context.Context, cfgFile string, streams IOStreams, v *viper.
 		return fmt.Errorf("initialize logging: %w", err)
 	}
 
-	toolsets, err := defaultToolsets(cfg)
+	toolsets, err := runtimeToolsets(ctx, cfg)
 	if err != nil {
 		return err
 	}
@@ -79,6 +79,7 @@ func runServer(ctx context.Context, cfgFile string, streams IOStreams, v *viper.
 		Toolsets:     toolsets,
 	})
 	if err != nil {
+		closeToolsets(toolsets)
 		return fmt.Errorf("create MCP server: %w", err)
 	}
 	defer server.Close()

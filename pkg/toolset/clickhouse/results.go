@@ -71,20 +71,28 @@ func scannedValue(destination any) any {
 }
 
 func (t *Toolset) queryError(operation string, err error) error {
-	message := err.Error()
-	if t.password != "" {
-		forms := []string{
-			t.password,
-			url.QueryEscape(t.password),
-			url.PathEscape(t.password),
-			url.UserPassword("", t.password).String(),
-		}
-		sort.Slice(forms, func(i, j int) bool { return len(forms[i]) > len(forms[j]) })
-		for _, form := range forms {
-			message = strings.ReplaceAll(message, form, "[redacted]")
-		}
-	}
+	message := redactSecret(err.Error(), t.password)
 	return fmt.Errorf("ClickHouse %s failed at %s (database %q): %s; check clickhouse.address, clickhouse.secure, clickhouse.database, and the SQL", operation, t.address, t.database, message)
+}
+
+func redactSecret(message, password string) string {
+	if password == "" {
+		return message
+	}
+	forms := []string{
+		password,
+		url.QueryEscape(password),
+		url.PathEscape(password),
+		url.UserPassword("", password).String(),
+	}
+	sort.Slice(forms, func(i, j int) bool { return len(forms[i]) > len(forms[j]) })
+	for _, form := range forms {
+		if form == "" {
+			continue
+		}
+		message = strings.ReplaceAll(message, form, "[redacted]")
+	}
+	return message
 }
 
 func displayRow(values []any) []any {

@@ -8,7 +8,7 @@ MCP 服务本身不做认证，默认只监听 `127.0.0.1`。除非另行设计�
 
 ## 快速开始
 
-1. 复制示例配置并设置 ClickHouse HTTP 地址。
+1. 复制示例配置并设置 ClickHouse HTTP 地址。请使用只读用户；内置 `default` 用户会在启动时被拒绝。参见[服务账号](#服务账号)。
 
    ```bash
    cp config.example.yaml config.yaml
@@ -53,7 +53,7 @@ MCP 服务本身不做认证，默认只监听 `127.0.0.1`。除非另行设计�
 
 `clickhouse_query` 默认最多返回 1,000 行。服务会额外读取一行判断 `truncated: true`，但该额外行不会出现在结果中。每个非空单元格都会显示为字符串，使 JSON 结构稳定。
 
-查询工具只接受一条 SQL。字符串、quoted identifier 和 SQL 注释中的分号可以使用；第二条语句会在到达 ClickHouse 前被拒绝。所有查询均携带 ClickHouse 的 `readonly=1` 设置，因此遵守此设置的 ClickHouse 会拒绝写入和 DDL。连接使用的 ClickHouse 用户仍应只授予读所需的权限。
+查询工具只接受一条 SQL。字符串、quoted identifier 和 SQL 注释中的分号可以使用；第二条语句会在到达 ClickHouse 前被拒绝。所有查询均携带 ClickHouse 的 `readonly=1` 设置，因此遵守此设置的 ClickHouse 会拒绝写入和 DDL。启动时还会拒绝可以管理 ClickHouse、读取外部数据源或执行全局 DDL 的账号。参见[服务账号](#服务账号)。
 
 ## 配置
 
@@ -69,6 +69,7 @@ clickhouse:
   secure: false
   username: ""
   password: ""
+allow_unsafe_database_role: false
 ```
 
 | 分组 | YAML 键 | 环境变量 | 默认值 | 含义 |
@@ -86,8 +87,39 @@ clickhouse:
 | 工具筛选 | `disabled_tools` | `MCP_DISABLED_TOOLS` | 空 | 以逗号分隔的禁止工具名 |
 | 工具筛选 | `enabled_domains` | `MCP_ENABLED_DOMAINS` | 空 | 以逗号分隔的允许工具域 |
 | 工具筛选 | `disabled_domains` | `MCP_DISABLED_DOMAINS` | 空 | 以逗号分隔的禁止工具域 |
+| 服务运行 | `allow_unsafe_database_role` | `MCP_ALLOW_UNSAFE_DATABASE_ROLE` | `false` | 仅跳过启动时的危险权限拒绝 |
 
 服务不会记录配置的密码。`secure: true` 只保护到 ClickHouse 的连接；它不会为 MCP HTTP 端点增加 TLS 或认证。
+
+### 服务账号
+
+进程连上 ClickHouse 之后、任何工具执行查询之前，启动流程会读取当前用户的 `SHOW GRANTS FINAL`。该语句包含经由角色继承的权限。出现下列任一权限时，启动以 `[clickhouse_unsafe_service_role] database service role is not permitted` 失败：
+
+- `ACCESS MANAGEMENT`，或其组内权限，包括 `CREATE USER`、`ALTER USER`、`DROP USER`、`CREATE ROLE`、`DROP ROLE`、`ROLE ADMIN`、行策略、配额、settings profile 和 `SHOW ACCESS`
+- `SYSTEM`，或任何 `SYSTEM …` 权限，例如 `SYSTEM SHUTDOWN`
+- `SOURCES`、`READ`、`WRITE`，或 `FILE`、`URL`、`REMOTE`、`S3` 等外部数据源权限
+- 作用在 `*.*` 上的全局 DDL，或全局 `ALL` / `ALL PRIVILEGES`：`CREATE`、`ALTER`、`DROP`、`TRUNCATE`、`OPTIMIZE` 及其 DDL 子权限
+- 类似的管理权限：`BACKUP`、`KILL QUERY`、`KILL TRANSACTION`、`MOVE PARTITION BETWEEN SHARDS`、`TABLE ENGINE`、`CLUSTER`、`NAMED COLLECTION ADMIN`（含 named collection 密钥）、`SET DEFINER` 和 `ALLOW SQL SECURITY NONE`
+
+只有 `SELECT` 和 `SHOW` 的账号用默认配置即可启动，不需要打开开关。授予在单个数据库上、而不是 `*.*` 上的 DDL，不会被当成危险服务角色。查询仍然带 `readonly=1`。
+
+`allow_unsafe_database_role` 默认为 `false`。只有无法准备最小权限账号时，才在配置文件里设为 `true`，或导出 `MCP_ALLOW_UNSAFE_DATABASE_ROLE=true`。服务会打一条警告日志，并跳过这一次权限拒绝。连接被拒绝、权限探测失败，以及其他启动检查仍会中止启动。`readonly=1` 约束不了 `SYSTEM`、`ACCESS MANAGEMENT` 或 `SOURCES`：这类账号可以关闭服务、修改用户，或在 `SELECT` 里读取服务器文件和远程 URL。只在你可控的 ClickHouse 实例上启用该选项。
+
+警告使用 warn 级别。HTTP 模式在默认 `info` 日志级别下可以看到它。stdio 模式会关闭日志，以免干扰 MCP 输出。
+
+`config check --connect` 只对 ClickHouse 做 `Ping`，不执行这次权限检查。`mcp` 和 `tools call` 会执行。
+
+不要使用 ClickHouse 的 `default` 用户。常规安装会授予该用户 `ALL ON *.*`。
+
+```sql
+CREATE USER mcp_reader IDENTIFIED WITH no_password;
+GRANT SELECT ON analytics.* TO mcp_reader;
+GRANT SELECT ON system.databases TO mcp_reader;
+GRANT SELECT ON system.tables TO mcp_reader;
+GRANT SELECT ON system.columns TO mcp_reader;
+```
+
+内置的发现工具会读取这三张 system 表。查询工具需要读哪些库，就对那些库授予 `SELECT`。
 
 ### 仅用环境变量检查配置
 
@@ -98,7 +130,7 @@ export MCP_CLICKHOUSE_ADDRESS=127.0.0.1:8123
 ./bin/clickhouse-mcp-server config check
 ```
 
-命令按稳定顺序输出 13 个配置字段及其来源（`flag`、`environment`、`YAML` 或 `default`）。密码只显示 `set` 或 `unset`；`sse_base_url` 在显示前会删除 query 和 fragment，并脱敏 URL userinfo。
+命令按稳定顺序输出 14 个配置字段及其来源（`flag`、`environment`、`YAML` 或 `default`）。密码只显示 `set` 或 `unset`；`sse_base_url` 在显示前会删除 query 和 fragment，并脱敏 URL userinfo。
 
 只有明确需要一次 ClickHouse HTTP(S) `Ping` 时才追加 `--connect`。它会打开、Ping 并关闭一个短生命周期连接，不会启动 MCP 服务。
 
@@ -155,6 +187,7 @@ docker run --rm -i ghcr.io/futuretea/clickhouse-mcp-server:v<version>
 
 ## 排查
 
+- `[clickhouse_unsafe_service_role]`：配置的用户可以管理 ClickHouse、读取外部数据源，或执行全局 DDL。请改用只有 `SELECT` 的用户，或仅在你可控的实例上设置 `allow_unsafe_database_role: true`。
 - `clickhouse.address is required`：在配置中填写 `host:port`，例如 `127.0.0.1:8123`，或设置 `MCP_CLICKHOUSE_ADDRESS`。
 - 连接失败：检查地址、`secure` 值、ClickHouse HTTP 端口和网络可达性。
 - 查询被拒绝：确认 SQL 只有一条只读语句，且 ClickHouse 用户有目标数据库的访问权限。
@@ -177,7 +210,7 @@ make ci
 make test-integration
 ```
 
-该目标需要 Docker 和 `curl`，会使用随机 loopback 端口、等待 ClickHouse 健康检查，并在退出时删除容器。可设置 `CLICKHOUSE_INTEGRATION_IMAGE` 来测试另一个隔离镜像。该目标会运行完整 MCP HTTP E2E、只读工具集集成测试和 `config check --connect`。它只在本地运行：`make test` 和 GitHub Actions CI 都不会执行它。
+该目标需要 Docker 和 `curl`，会使用随机 loopback 端口、等待 ClickHouse 健康检查，并在退出时删除容器。可设置 `CLICKHOUSE_INTEGRATION_IMAGE` 来测试另一个隔离镜像。脚本会创建拥有 `*.*` 上 `SELECT` 和 `SHOW` 的用户 `mcp_reader`，并以此用户运行测试，因此启动权限检查在不设置 `allow_unsafe_database_role` 时可以通过。该目标会运行完整 MCP HTTP E2E、只读工具集集成测试和 `config check --connect`。它只在本地运行：`make test` 和 GitHub Actions CI 都不会执行它。
 
 仓库仍保留 `scripts/` 和 `templates/` 中的模板资产供本地参考；它们不属于 ClickHouse server 的运行时部分。
 
