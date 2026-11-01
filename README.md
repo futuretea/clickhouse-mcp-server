@@ -204,7 +204,7 @@ make ci
 
 ### Optional ClickHouse integration test
 
-The default test suite has no external dependency. The opt-in integration test starts an isolated local ClickHouse Docker container to verify database discovery, parameterized table inspection, `SELECT`, and that `readonly=1` rejects temporary DDL. It also builds the public server binary, starts it in HTTP mode on loopback, checks `/healthz`, and calls `tools/list` and `tools/call` through `/mcp`.
+The default test suite has no external dependency. The opt-in integration test starts an isolated local ClickHouse Docker container to verify database discovery, parameterized table inspection, `SELECT`, and that `CREATE TEMPORARY TABLE` is denied for the `SELECT`/`SHOW` account. ClickHouse returns `ACCESS_DENIED` (code 497) because that privilege can only be granted on `*.*`, which startup rejects. It also builds the public server binary, starts it in HTTP mode on loopback, checks `/healthz`, and calls `tools/list` and `tools/call` through `/mcp`.
 
 ```bash
 make test-integration

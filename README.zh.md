@@ -204,7 +204,7 @@ make ci
 
 ### 可选 ClickHouse 集成测试
 
-默认测试不依赖外部服务。这个 opt-in 集成测试会启动隔离的本地 ClickHouse Docker 容器，验证数据库发现、带参数的表检查、`SELECT`，以及 `readonly=1` 会拒绝临时 DDL。它还会构建公开的 server 二进制文件，以 HTTP 模式在 loopback 上启动，检查 `/healthz`，并经由 `/mcp` 调用 `tools/list` 和 `tools/call`。
+默认测试不依赖外部服务。这个 opt-in 集成测试会启动隔离的本地 ClickHouse Docker 容器，验证数据库发现、带参数的表检查、`SELECT`，以及 `SELECT`/`SHOW` 账号执行 `CREATE TEMPORARY TABLE` 会被拒绝。该权限只能授予在 `*.*` 上，启动检查会拒绝这种授权，因此 ClickHouse 返回 `ACCESS_DENIED`（代码 497）。它还会构建公开的 server 二进制文件，以 HTTP 模式在 loopback 上启动，检查 `/healthz`，并经由 `/mcp` 调用 `tools/list` 和 `tools/call`。
 
 ```bash
 make test-integration

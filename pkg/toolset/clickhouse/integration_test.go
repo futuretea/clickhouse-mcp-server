@@ -89,7 +89,17 @@ func TestIntegrationReadOnlyClickHouse(t *testing.T) {
 	_, err = handlers["clickhouse_query"](t.Context(), map[string]any{
 		"query": "CREATE TEMPORARY TABLE clickhouse_mcp_readonly_test (id UInt8)",
 	})
-	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "readonly") {
-		t.Fatalf("temporary DDL error = %v, want ClickHouse readonly rejection", err)
+	// CREATE TEMPORARY TABLE is global-only. Granting it on *.* is rejected at
+	// startup, so this SELECT/SHOW account is denied the privilege (code 497)
+	// rather than reaching the readonly=1 check.
+	if err == nil || !temporaryDDLDenied(err.Error()) {
+		t.Fatalf("temporary DDL error = %v, want ClickHouse ACCESS_DENIED for CREATE TEMPORARY TABLE", err)
 	}
+}
+
+func temporaryDDLDenied(message string) bool {
+	text := strings.ToLower(message)
+	return strings.Contains(text, "access_denied") &&
+		strings.Contains(text, "code: 497") &&
+		strings.Contains(text, "create temporary table")
 }
