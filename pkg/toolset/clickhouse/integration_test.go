@@ -4,6 +4,7 @@ package clickhouse
 
 import (
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
@@ -94,6 +95,23 @@ func TestIntegrationReadOnlyClickHouse(t *testing.T) {
 	// rather than reaching the readonly=1 check.
 	if err == nil || !temporaryDDLDenied(err.Error()) {
 		t.Fatalf("temporary DDL error = %v, want ClickHouse ACCESS_DENIED for CREATE TEMPORARY TABLE", err)
+	}
+}
+
+func TestIntegrationAIFunctionPrivilegeRejected(t *testing.T) {
+	if os.Getenv("MCP_CLICKHOUSE_AI_PROBE") != "1" {
+		t.Skip("AI FUNCTIONS privilege probe is not enabled")
+	}
+	cfg, err := config.LoadConfig("", viper.New())
+	if err != nil {
+		t.Fatalf("load integration configuration: %v", err)
+	}
+	toolset, err := NewToolset(t.Context(), cfg.ClickHouse, cfg.AllowUnsafeDatabaseRole)
+	if toolset != nil {
+		t.Fatal("NewToolset returned a toolset for an AI function privilege")
+	}
+	if err == nil || !strings.Contains(err.Error(), "clickhouse_unsafe_service_role") {
+		t.Fatalf("NewToolset error = %v, want clickhouse_unsafe_service_role", err)
 	}
 }
 

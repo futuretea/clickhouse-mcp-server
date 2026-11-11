@@ -162,7 +162,8 @@ func TestNewToolsetRejectsDangerousPrivileges(t *testing.T) {
 func TestNewToolsetAllowsUnsafePrivilegesWhenOptedIn(t *testing.T) {
 	output := captureStartupLog(t)
 	client := newStartupClient([][]string{{
-		"GRANT ACCESS MANAGEMENT, SYSTEM, SOURCES, FILE ON *.* TO `sentinel-account`",
+		"GRANT ACCESS MANAGEMENT, SYSTEM, SOURCES, FILE, AI FUNCTIONS ON *.* TO `sentinel-account`",
+		"GRANT aiGenerate ON *.* TO `sentinel-account`",
 		"GRANT CREATE TABLE, DROP, ALTER, TRUNCATE ON *.* TO `sentinel-account`",
 	}})
 	toolset, err := openStartup(t, client, true)
@@ -210,7 +211,7 @@ func TestNewToolsetStartsSafeReadOnlyAccountWithoutOptOut(t *testing.T) {
 	if toolset == nil {
 		t.Fatal("NewToolset toolset = nil, want started toolset")
 	}
-	assertStartupQueries(t, client, []string{showCurrentGrantsSQL})
+	assertStartupQueries(t, client, []string{showCurrentGrantsSQL, showAIFunctionSettingSQL})
 	assertNoStartupOptOut(t, output.String())
 	if client.closed != 0 {
 		t.Fatalf("startup closed the connection count = %d, want 0", client.closed)
@@ -277,6 +278,7 @@ func TestNewToolsetAllowsDatabaseDDLAndEmptyGrants(t *testing.T) {
 		assertStartupQueries(t, client, []string{
 			showCurrentGrantsSQL,
 			"SHOW GRANTS FOR `reader_role` FINAL",
+			showAIFunctionSettingSQL,
 		})
 	})
 
@@ -385,9 +387,11 @@ func TestNewToolsetOptOutDoesNotSkipOtherStartupFailures(t *testing.T) {
 }
 
 func TestNewToolsetUsesRawGrantQueryWhenAvailable(t *testing.T) {
-	client := &rawAwareClient{fakeClient: &fakeClient{responses: grantResponses([][]string{{
+	responses := grantResponses([][]string{{
 		"GRANT SELECT ON analytics.* TO reader",
-	}})}}
+	}})
+	responses = append(responses, fakeResponse{columns: []string{"setting"}, rows: [][]any{{"false"}}})
+	client := &rawAwareClient{fakeClient: &fakeClient{responses: responses}}
 	toolset, err := newToolset(t.Context(), startupConfig(), false, func(config.ClickHouseConfig) (QueryClient, error) {
 		return client, nil
 	})
@@ -395,9 +399,50 @@ func TestNewToolsetUsesRawGrantQueryWhenAvailable(t *testing.T) {
 		t.Fatalf("NewToolset: %v", err)
 	}
 	_ = toolset.Close()
-	if len(client.rawQueries) != 1 || client.rawQueries[0] != showCurrentGrantsSQL {
-		t.Fatalf("raw queries = %#v, want %s", client.rawQueries, showCurrentGrantsSQL)
+	if len(client.rawQueries) != 2 || client.rawQueries[0] != showCurrentGrantsSQL || client.rawQueries[1] != showAIFunctionSettingSQL {
+		t.Fatalf("raw queries = %#v, want grant probe then AI setting", client.rawQueries)
 	}
+}
+
+func TestNewToolsetRejectsEnabledAIFunctionSetting(t *testing.T) {
+	output := captureStartupLog(t)
+	responses := grantResponses([][]string{{"GRANT SELECT, SHOW ON *.* TO reader"}})
+	responses = append(responses, fakeResponse{columns: []string{"setting"}, rows: [][]any{{"true"}}})
+	client := newStartupClient(nil)
+	client.responses = responses
+	toolset, err := openStartup(t, client, false)
+	if toolset != nil {
+		t.Fatal("NewToolset returned a toolset with AI functions enabled")
+	}
+	assertUnsafeServiceRole(t, err)
+	assertStartupQueries(t, client, []string{showCurrentGrantsSQL, showAIFunctionSettingSQL})
+	assertNoStartupOptOut(t, output.String())
+}
+
+func TestNewToolsetOptOutDoesNotSkipAISettingProbeFailure(t *testing.T) {
+	output := captureStartupLog(t)
+	responses := grantResponses([][]string{{"GRANT SELECT ON *.* TO reader"}})
+	responses = append(responses, fakeResponse{err: errors.New("setting probe failed dsn-sentinel-password")})
+	client := newStartupClient(nil)
+	client.responses = responses
+	toolset, err := openStartup(t, client, true)
+	if toolset != nil {
+		t.Fatal("NewToolset returned a toolset after the AI setting probe failed")
+	}
+	assertStartupFailure(t, err)
+	assertNoStartupOptOut(t, output.String())
+}
+
+func TestNewToolsetAllowsReaderWhenAISettingIsUnknown(t *testing.T) {
+	responses := grantResponses([][]string{{"GRANT SELECT, SHOW ON *.* TO reader"}})
+	responses = append(responses, fakeResponse{err: errors.New("Code: 115. DB::Exception: Unknown setting allow_experimental_ai_functions. (UNKNOWN_SETTING)")})
+	client := newStartupClient(nil)
+	client.responses = responses
+	toolset, err := openStartup(t, client, false)
+	if err != nil {
+		t.Fatalf("NewToolset: %v", err)
+	}
+	_ = toolset.Close()
 }
 
 func TestNewCatalogToolsetDoesNotConnect(t *testing.T) {
@@ -482,7 +527,9 @@ func captureStartupLog(t *testing.T) *bytes.Buffer {
 }
 
 func newStartupClient(grantSets [][]string) *startupClient {
-	return &startupClient{fakeClient: &fakeClient{responses: grantResponses(grantSets)}}
+	responses := grantResponses(grantSets)
+	responses = append(responses, fakeResponse{columns: []string{"setting"}, rows: [][]any{{"false"}}})
+	return &startupClient{fakeClient: &fakeClient{responses: responses}}
 }
 
 func grantResponses(grantSets [][]string) []fakeResponse {

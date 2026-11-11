@@ -53,7 +53,7 @@ All successful tool calls return JSON in MCP text content.
 
 `clickhouse_query` defaults to 1,000 rows. The server reads one additional row to report `truncated: true`; that extra row is not returned. Each non-null cell is rendered as a string so clients receive a stable JSON shape.
 
-The query tool accepts exactly one statement. Semicolons in strings, quoted identifiers, and SQL comments are allowed; a second statement is rejected before it reaches ClickHouse. Every query is sent with ClickHouse `readonly=1`, so ClickHouse rejects writes and DDL for a user that honors that setting. Startup also rejects accounts that can administer ClickHouse, read external sources, or run global DDL. See [Service account](#service-account).
+The query tool accepts exactly one statement. Semicolons in strings, quoted identifiers, and SQL comments are allowed; a second statement is rejected before it reaches ClickHouse. Every query is sent with ClickHouse `readonly=1`. That setting rejects writes, DDL, `SYSTEM` statements, user administration, and source table functions such as `file` and `url`. It does not reject AI functions, which run inside `SELECT`. Startup rejects accounts that can administer ClickHouse, read external sources, run global DDL, or call AI functions. See [Service account](#service-account).
 
 ## Configuration
 
@@ -100,10 +100,15 @@ After the process connects, and before any tool runs a query, startup reads `SHO
 - `SOURCES`, `READ`, `WRITE`, or an external source privilege such as `FILE`, `URL`, `REMOTE`, `S3`, `YTSAURUS`, or `ARROW FLIGHT`
 - global DDL or global `ALL` / `ALL PRIVILEGES` on `*.*`: `CREATE`, `ALTER`, `DROP`, `TRUNCATE`, `OPTIMIZE`, and their DDL children, including `ALTER HANDLER`
 - similar administrative grants: `BACKUP`, `KILL QUERY`, `KILL TRANSACTION`, `MOVE PARTITION BETWEEN SHARDS`, `TABLE ENGINE`, `CLUSTER`, `NAMED COLLECTION ADMIN` (including named-collection secrets), `SET DEFINER`, `ALLOW SQL SECURITY NONE`, `SHOW CONNECTIONS`, and `SHOW HANDLERS`
+- `AI FUNCTIONS`, or an individual AI function privilege such as `aiGenerate`, `aiEmbed`, `aiClassify`, `aiExtract`, `aiFilter`, `aiRedact`, `aiSimilarity`, or `aiTranslate`. A later privilege in that family is rejected too. `SHOW GRANTS` prints the group as `AI FUNCTIONS` and each function as one token, such as `aiGenerate`.
 
 An account limited to `SELECT` and `SHOW` starts with the default configuration. No opt-out is required. DDL granted on one database, rather than on `*.*`, is not treated as a dangerous service role. Queries are still sent with `readonly=1`.
 
-`allow_unsafe_database_role` defaults to `false`. Set it to `true` in the config file, or export `MCP_ALLOW_UNSAFE_DATABASE_ROLE=true`, only when you cannot provision a least-privilege account. The server logs a warning and skips this privilege rejection. A refused connection, a failed grant probe, and every other startup check still stop startup. `readonly=1` does not constrain `SYSTEM`, `ACCESS MANAGEMENT`, or `SOURCES`: that account can shut the server down, change users, or read server files and remote URLs from a `SELECT`. Enable the option only for a ClickHouse instance you control.
+`allow_unsafe_database_role` defaults to `false`. Set it to `true` in the config file, or export `MCP_ALLOW_UNSAFE_DATABASE_ROLE=true`, only when you cannot provision a least-privilege account. The server logs a warning and skips this privilege rejection. A refused connection, a failed grant probe, and every other startup check still stop startup. The flag does not remove `readonly=1`.
+
+`readonly=1` rejects writes, DDL, `SYSTEM` statements, `CREATE USER`, and `SELECT` from the `file` and `url` table functions. It does not reject AI functions. Those functions send prompt text to an external endpoint once credentials are available. Startup rejects `AI FUNCTIONS` and each `ai*` privilege. It also rejects an account whose effective `allow_experimental_ai_functions` setting is enabled. ClickHouse 26.5 has no AI privilege row and uses that setting to turn the functions on. Servers that grant the row, including ClickHouse 26.11, print `GRANT AI FUNCTIONS` and `GRANT aiGenerate`. The integration image pinned in `scripts/test-integration.sh` is ClickHouse 26.5.6.64, which has no AI privilege row. Unit tests cover that grant text and the setting. The integration script adds a live rejection when the connected server has the privilege row.
+
+`SELECT` from `system.connections` still runs under `readonly=1`. Startup rejects `SHOW CONNECTIONS` and `SHOW HANDLERS` for that reason. Enable the opt-out only for a ClickHouse instance you control.
 
 The warning is logged at warn level. HTTP mode shows it at the default `info` log level. Stdio mode keeps logs disabled so MCP output stays intact.
 
@@ -187,7 +192,7 @@ Both commands launch the `mcp` command. Arguments after the package or image are
 
 ## Troubleshooting
 
-- `[clickhouse_unsafe_service_role]`: the configured user can administer ClickHouse, read external sources, or run global DDL. Create a `SELECT`-only user, or set `allow_unsafe_database_role: true` only on an instance you control.
+- `[clickhouse_unsafe_service_role]`: the configured user can administer ClickHouse, read external sources, run global DDL, or call AI functions. Create a `SELECT`-only user, or set `allow_unsafe_database_role: true` only on an instance you control. The opt-out does not remove `readonly=1`.
 - `clickhouse.address is required`: add a `host:port` value such as `127.0.0.1:8123` to the configuration or `MCP_CLICKHOUSE_ADDRESS`.
 - Connection failure: check the address, `secure` value, ClickHouse HTTP port, and network reachability.
 - Query rejection: verify the statement is a single read-only query and that the configured ClickHouse user has access to the database.
@@ -210,7 +215,7 @@ The default test suite has no external dependency. The opt-in integration test s
 make test-integration
 ```
 
-The target requires Docker and `curl`, creates a random loopback port, waits for ClickHouse health, and removes its container on exit. Set `CLICKHOUSE_INTEGRATION_IMAGE` to test another isolated image. It creates ClickHouse user `mcp_reader` with `SELECT` and `SHOW` on `*.*` and runs the tests as that user, so the startup privilege check passes without `allow_unsafe_database_role`. It runs the full MCP HTTP E2E test, the read-only toolset integration test, and `config check --connect`. It is local-only: neither `make test` nor the GitHub Actions CI workflow runs it.
+The target requires Docker and `curl`, creates a random loopback port, waits for ClickHouse health, and removes its container on exit. Set `CLICKHOUSE_INTEGRATION_IMAGE` to test another isolated image. It creates ClickHouse user `mcp_reader` with `SELECT` and `SHOW` on `*.*` and runs the tests as that user, so the startup privilege check passes without `allow_unsafe_database_role`. It runs the full MCP HTTP E2E test, the read-only toolset integration test, and `config check --connect`. When `system.privileges` contains `AI FUNCTIONS`, it also creates `ai_probe` with that privilege and expects startup to reject the account. ClickHouse 26.5.6.64, the default image, has no such row, so that extra check does not run there. It is local-only: neither `make test` nor the GitHub Actions CI workflow runs it.
 
 The repository retains its template assets under `scripts/` and `templates/` for local reference; they are not part of the ClickHouse server runtime.
 

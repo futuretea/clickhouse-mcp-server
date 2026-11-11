@@ -15,6 +15,7 @@ import (
 const (
 	startupRoleOptOutMessage = "database service role is not permitted; allow_unsafe_database_role is set, so the startup role check is skipped"
 	showCurrentGrantsSQL     = "SHOW GRANTS FINAL"
+	showAIFunctionSettingSQL = "SELECT toString(getSetting('allow_experimental_ai_functions'))"
 	maxRoleExpansions        = 8
 	unsafeServiceRoleError   = "[clickhouse_unsafe_service_role] database service role is not permitted"
 )
@@ -319,7 +320,7 @@ func (t *Toolset) serviceAccountUnsafe(ctx context.Context) (bool, error) {
 		}
 		pending = uniqueNewRoles(seen, expandedRoles)
 	}
-	return false, nil
+	return t.aiFunctionsEnabledBySetting(ctx)
 }
 
 func (t *Toolset) readGrantStatements(ctx context.Context, query string) ([]string, error) {
@@ -489,7 +490,7 @@ func privilegesUnsafe(names []string, scope string) bool {
 }
 
 func privilegeUnsafe(name string, global bool) bool {
-	if _, ok := alwaysUnsafePrivileges[name]; ok || name == "SYSTEM" || strings.HasPrefix(name, "SYSTEM ") {
+	if _, ok := alwaysUnsafePrivileges[name]; ok || name == "SYSTEM" || strings.HasPrefix(name, "SYSTEM ") || aiFunctionPrivilege(name) {
 		return true
 	}
 	if !global {
@@ -497,6 +498,62 @@ func privilegeUnsafe(name string, global bool) bool {
 	}
 	_, ok := globalDDLPrivileges[name]
 	return ok
+}
+
+// aiFunctionPrivilege reports the AI FUNCTIONS group and one AI function
+// privilege. SHOW GRANTS prints the group as "AI FUNCTIONS" and each function
+// as a single token such as "aiGenerate". normalizePrivilege uppercases that
+// token to "AIGENERATE". These are SELECT functions, so readonly=1 does not
+// stop them from sending prompt text to an external endpoint.
+func (t *Toolset) aiFunctionsEnabledBySetting(ctx context.Context) (bool, error) {
+	rows, err := t.queryStartup(ctx, showAIFunctionSettingSQL)
+	if err != nil {
+		if unknownSetting(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	defer func() { _ = rows.Close() }()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return false, err
+		}
+		return false, errors.New("AI function setting probe returned no rows")
+	}
+	if len(rows.Columns()) == 0 {
+		return false, errors.New("AI function setting probe returned no columns")
+	}
+	_, destinations := scanDestinations(len(rows.Columns()), rows.ScanTypes())
+	if err := rows.Scan(destinations...); err != nil {
+		return false, err
+	}
+	text, err := grantText(scannedValue(destinations[0]))
+	if err != nil {
+		return false, err
+	}
+	switch strings.ToLower(text) {
+	case "1", "true":
+		return true, nil
+	case "0", "false":
+		return false, nil
+	default:
+		return false, fmt.Errorf("unrecognized AI function setting %q", text)
+	}
+}
+
+func unknownSetting(err error) bool {
+	text := err.Error()
+	return strings.Contains(text, "UNKNOWN_SETTING") || strings.Contains(text, "Unknown setting")
+}
+
+func aiFunctionPrivilege(name string) bool {
+	if name == "AI FUNCTIONS" {
+		return true
+	}
+	if len(name) < 3 || strings.Contains(name, " ") {
+		return false
+	}
+	return strings.HasPrefix(name, "AI")
 }
 
 func isGlobalScope(scope string) bool {

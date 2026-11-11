@@ -53,7 +53,7 @@ MCP 服务本身不做认证，默认只监听 `127.0.0.1`。除非另行设计�
 
 `clickhouse_query` 默认最多返回 1,000 行。服务会额外读取一行判断 `truncated: true`，但该额外行不会出现在结果中。每个非空单元格都会显示为字符串，使 JSON 结构稳定。
 
-查询工具只接受一条 SQL。字符串、quoted identifier 和 SQL 注释中的分号可以使用；第二条语句会在到达 ClickHouse 前被拒绝。所有查询均携带 ClickHouse 的 `readonly=1` 设置，因此遵守此设置的 ClickHouse 会拒绝写入和 DDL。启动时还会拒绝可以管理 ClickHouse、读取外部数据源或执行全局 DDL 的账号。参见[服务账号](#服务账号)。
+查询工具只接受一条 SQL。字符串、quoted identifier 和 SQL 注释中的分号可以使用；第二条语句会在到达 ClickHouse 前被拒绝。所有查询均携带 ClickHouse 的 `readonly=1` 设置。该设置会拒绝写入、DDL、`SYSTEM` 语句、用户管理，以及 `file`、`url` 这类外部数据源表函数。它不会拒绝 AI 函数，因为这些函数运行在 `SELECT` 里。启动时还会拒绝可以管理 ClickHouse、读取外部数据源、执行全局 DDL 或调用 AI 函数的账号。参见[服务账号](#服务账号)。
 
 ## 配置
 
@@ -100,10 +100,15 @@ allow_unsafe_database_role: false
 - `SOURCES`、`READ`、`WRITE`，或 `FILE`、`URL`、`REMOTE`、`S3`、`YTSAURUS`、`ARROW FLIGHT` 等外部数据源权限
 - 作用在 `*.*` 上的全局 DDL，或全局 `ALL` / `ALL PRIVILEGES`：`CREATE`、`ALTER`、`DROP`、`TRUNCATE`、`OPTIMIZE` 及其 DDL 子权限，包括 `ALTER HANDLER`
 - 类似的管理权限：`BACKUP`、`KILL QUERY`、`KILL TRANSACTION`、`MOVE PARTITION BETWEEN SHARDS`、`TABLE ENGINE`、`CLUSTER`、`NAMED COLLECTION ADMIN`（含 named collection 密钥）、`SET DEFINER`、`ALLOW SQL SECURITY NONE`、`SHOW CONNECTIONS` 和 `SHOW HANDLERS`
+- `AI FUNCTIONS`，或单个 AI 函数权限，例如 `aiGenerate`、`aiEmbed`、`aiClassify`、`aiExtract`、`aiFilter`、`aiRedact`、`aiSimilarity`、`aiTranslate`。同一族里以后新增的权限也会被拒绝。`SHOW GRANTS` 把这一组打印成 `AI FUNCTIONS`，把每个函数打印成一个标识，例如 `aiGenerate`。
 
 只有 `SELECT` 和 `SHOW` 的账号用默认配置即可启动，不需要打开开关。授予在单个数据库上、而不是 `*.*` 上的 DDL，不会被当成危险服务角色。查询仍然带 `readonly=1`。
 
-`allow_unsafe_database_role` 默认为 `false`。只有无法准备最小权限账号时，才在配置文件里设为 `true`，或导出 `MCP_ALLOW_UNSAFE_DATABASE_ROLE=true`。服务会打一条警告日志，并跳过这一次权限拒绝。连接被拒绝、权限探测失败，以及其他启动检查仍会中止启动。`readonly=1` 约束不了 `SYSTEM`、`ACCESS MANAGEMENT` 或 `SOURCES`：这类账号可以关闭服务、修改用户，或在 `SELECT` 里读取服务器文件和远程 URL。只在你可控的 ClickHouse 实例上启用该选项。
+`allow_unsafe_database_role` 默认为 `false`。只有无法准备最小权限账号时，才在配置文件里设为 `true`，或导出 `MCP_ALLOW_UNSAFE_DATABASE_ROLE=true`。服务会打一条警告日志，并跳过这一次权限拒绝。连接被拒绝、权限探测失败，以及其他启动检查仍会中止启动。这个开关不会去掉 `readonly=1`。
+
+`readonly=1` 会拒绝写入、DDL、`SYSTEM` 语句、`CREATE USER`，以及从 `file`、`url` 表函数发起的 `SELECT`。它不会拒绝 AI 函数。这些函数在具备凭据时会把提示文本发到外部端点。启动会拒绝 `AI FUNCTIONS` 和每个 `ai*` 权限，也会拒绝当前会话把 `allow_experimental_ai_functions` 打开的账号。ClickHouse 26.5 没有 AI 权限行，靠这个设置打开函数。会授予该权限的服务，包括 ClickHouse 26.11，会打印 `GRANT AI FUNCTIONS` 和 `GRANT aiGenerate`。`scripts/test-integration.sh` 固定的集成镜像是 ClickHouse 26.5.6.64，没有 AI 权限行。单元测试覆盖这段授权文本和该设置。集成脚本只在所连服务存在该权限行时追加一次真实拒绝检查。
+
+`readonly=1` 下仍然可以 `SELECT system.connections`。因此启动会拒绝 `SHOW CONNECTIONS` 和 `SHOW HANDLERS`。只在你可控的 ClickHouse 实例上启用该选项。
 
 警告使用 warn 级别。HTTP 模式在默认 `info` 日志级别下可以看到它。stdio 模式会关闭日志，以免干扰 MCP 输出。
 
@@ -187,7 +192,7 @@ docker run --rm -i ghcr.io/futuretea/clickhouse-mcp-server:v<version>
 
 ## 排查
 
-- `[clickhouse_unsafe_service_role]`：配置的用户可以管理 ClickHouse、读取外部数据源，或执行全局 DDL。请改用只有 `SELECT` 的用户，或仅在你可控的实例上设置 `allow_unsafe_database_role: true`。
+- `[clickhouse_unsafe_service_role]`：配置的用户可以管理 ClickHouse、读取外部数据源、执行全局 DDL，或调用 AI 函数。请改用只有 `SELECT` 的用户，或仅在你可控的实例上设置 `allow_unsafe_database_role: true`。该开关不会去掉 `readonly=1`。
 - `clickhouse.address is required`：在配置中填写 `host:port`，例如 `127.0.0.1:8123`，或设置 `MCP_CLICKHOUSE_ADDRESS`。
 - 连接失败：检查地址、`secure` 值、ClickHouse HTTP 端口和网络可达性。
 - 查询被拒绝：确认 SQL 只有一条只读语句，且 ClickHouse 用户有目标数据库的访问权限。
@@ -210,7 +215,7 @@ make ci
 make test-integration
 ```
 
-该目标需要 Docker 和 `curl`，会使用随机 loopback 端口、等待 ClickHouse 健康检查，并在退出时删除容器。可设置 `CLICKHOUSE_INTEGRATION_IMAGE` 来测试另一个隔离镜像。脚本会创建拥有 `*.*` 上 `SELECT` 和 `SHOW` 的用户 `mcp_reader`，并以此用户运行测试，因此启动权限检查在不设置 `allow_unsafe_database_role` 时可以通过。该目标会运行完整 MCP HTTP E2E、只读工具集集成测试和 `config check --connect`。它只在本地运行：`make test` 和 GitHub Actions CI 都不会执行它。
+该目标需要 Docker 和 `curl`，会使用随机 loopback 端口、等待 ClickHouse 健康检查，并在退出时删除容器。可设置 `CLICKHOUSE_INTEGRATION_IMAGE` 来测试另一个隔离镜像。脚本会创建拥有 `*.*` 上 `SELECT` 和 `SHOW` 的用户 `mcp_reader`，并以此用户运行测试，因此启动权限检查在不设置 `allow_unsafe_database_role` 时可以通过。该目标会运行完整 MCP HTTP E2E、只读工具集集成测试和 `config check --connect`。当 `system.privileges` 含有 `AI FUNCTIONS` 时，脚本还会创建拥有该权限的 `ai_probe`，并期望启动拒绝该账号。默认镜像 ClickHouse 26.5.6.64 没有这一行，因此那里不会跑这份额外检查。它只在本地运行：`make test` 和 GitHub Actions CI 都不会执行它。
 
 仓库仍保留 `scripts/` 和 `templates/` 中的模板资产供本地参考；它们不属于 ClickHouse server 的运行时部分。
 
