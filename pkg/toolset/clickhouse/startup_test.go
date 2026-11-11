@@ -82,6 +82,31 @@ func TestNewToolsetRejectsDangerousPrivileges(t *testing.T) {
 		}
 	})
 
+	t.Run("ai function privileges", func(t *testing.T) {
+		// Grant text captured from ClickHouse 26.11 SHOW GRANTS FINAL.
+		// ClickHouse 26.5 has the functions and no privilege rows.
+		// aiNotInCatalogYet is the family rule, not a current catalog name.
+		grants := []string{
+			"GRANT AI FUNCTIONS ON *.* TO reader",
+			"GRANT aiGenerate ON *.* TO reader",
+			"GRANT aiEmbed ON analytics.* TO reader",
+			"GRANT aiClassify, aiExtract, aiFilter, aiRedact, aiSimilarity, aiTranslate ON *.* TO reader",
+			"GRANT aiNotInCatalogYet ON *.* TO reader",
+		}
+		for _, grant := range grants {
+			t.Run(grant, func(t *testing.T) {
+				output.Reset()
+				client := newStartupClient([][]string{{grant}})
+				toolset, err := openStartup(t, client, false)
+				if toolset != nil {
+					t.Fatal("NewToolset returned a toolset for an AI function privilege")
+				}
+				assertUnsafeServiceRole(t, err)
+				assertNoStartupOptOut(t, output.String())
+			})
+		}
+	})
+
 	t.Run("realistic default user grants", func(t *testing.T) {
 		output.Reset()
 		client := newStartupClient([][]string{{
