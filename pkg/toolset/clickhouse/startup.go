@@ -517,30 +517,133 @@ var queryTextTables = map[string]struct{}{
 }
 
 // selectsQueryText reports a SELECT or ALL grant that can read query text or
-// account credentials. A partial REVOKE does not remove the global GRANT line
-// from SHOW GRANTS FINAL, and it leaves the other tables readable.
+// account credentials. SHOW GRANTS leaves an unquoted trailing * in place.
+// system.proc* matches system.processes, and sys*.* matches the system
+// database. A backtick-quoted * is a literal name. Comparison is case
+// sensitive. A partial REVOKE does not remove a broader GRANT line.
 func selectsQueryText(name, scope string) bool {
 	switch name {
 	case "SELECT", "ALL", "ALL PRIVILEGES":
 	default:
 		return false
 	}
-	normalized := normalizeScope(scope)
-	if normalized == "*.*" {
+	database, table, ok := parseGrantScope(scope)
+	if !ok {
 		return true
 	}
-	parts := strings.Split(normalized, ".")
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return true
-	}
-	if !strings.EqualFold(parts[0], "system") {
+	if !database.matches("system") {
 		return false
 	}
-	if parts[1] == "*" {
+	for sensitive := range queryTextTables {
+		if table.matches(sensitive) {
+			return true
+		}
+	}
+	return false
+}
+
+// scopeName is one database or table component of a SHOW GRANTS scope.
+type scopeName struct {
+	all      bool
+	wildcard bool
+	prefix   string
+	exact    string
+}
+
+func (n scopeName) matches(concrete string) bool {
+	if n.all {
 		return true
 	}
-	_, ok := queryTextTables[strings.ToLower(parts[1])]
-	return ok
+	if n.wildcard {
+		return strings.HasPrefix(concrete, n.prefix)
+	}
+	return n.exact == concrete
+}
+
+func parseGrantScope(scope string) (scopeName, scopeName, bool) {
+	database, table, ok := splitGrantScope(strings.TrimSpace(scope))
+	if !ok {
+		return scopeName{}, scopeName{}, false
+	}
+	parsedDatabase, ok := parseScopeName(database)
+	if !ok {
+		return scopeName{}, scopeName{}, false
+	}
+	parsedTable, ok := parseScopeName(table)
+	if !ok {
+		return scopeName{}, scopeName{}, false
+	}
+	return parsedDatabase, parsedTable, true
+}
+
+func splitGrantScope(scope string) (string, string, bool) {
+	inBacktick := false
+	for i := 0; i < len(scope); i++ {
+		switch scope[i] {
+		case '`':
+			if inBacktick && i+1 < len(scope) && scope[i+1] == '`' {
+				i++
+				continue
+			}
+			inBacktick = !inBacktick
+		case '.':
+			if inBacktick {
+				continue
+			}
+			if i == 0 || i == len(scope)-1 || strings.Contains(scope[i+1:], ".") && scopeHasDotOutside(scope[i+1:]) {
+				return "", "", false
+			}
+			return scope[:i], scope[i+1:], true
+		}
+	}
+	return "", "", false
+}
+
+func scopeHasDotOutside(scope string) bool {
+	inBacktick := false
+	for i := 0; i < len(scope); i++ {
+		switch scope[i] {
+		case '`':
+			if inBacktick && i+1 < len(scope) && scope[i+1] == '`' {
+				i++
+				continue
+			}
+			inBacktick = !inBacktick
+		case '.':
+			if !inBacktick {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func parseScopeName(token string) (scopeName, bool) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return scopeName{}, false
+	}
+	if token[0] == '`' {
+		name, rest, err := unquoteIdent(token)
+		if err != nil || strings.TrimSpace(rest) != "" {
+			return scopeName{}, false
+		}
+		return scopeName{exact: name}, true
+	}
+	if token == "*" {
+		return scopeName{all: true}, true
+	}
+	if strings.HasSuffix(token, "*") {
+		prefix := token[:len(token)-1]
+		if prefix == "" || strings.Contains(prefix, "*") {
+			return scopeName{}, false
+		}
+		return scopeName{wildcard: true, prefix: prefix}, true
+	}
+	if strings.Contains(token, "*") {
+		return scopeName{}, false
+	}
+	return scopeName{exact: token}, true
 }
 
 // aiFunctionPrivilege reports the AI FUNCTIONS group and one AI function

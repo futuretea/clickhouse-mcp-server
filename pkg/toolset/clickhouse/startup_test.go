@@ -127,6 +127,7 @@ func TestNewToolsetRejectsDangerousPrivileges(t *testing.T) {
 			"GRANT ALL ON system.proc* TO reader",
 			"GRANT SELECT ON sys*.* TO reader",
 			"GRANT SELECT ON s*.* TO reader",
+			"GRANT SELECT ON system.a* TO reader",
 			"GRANT SELECT(query, user) ON system.processes TO reader",
 		}
 		for _, grant := range grants {
@@ -141,6 +142,23 @@ func TestNewToolsetRejectsDangerousPrivileges(t *testing.T) {
 				assertNoStartupOptOut(t, output.String())
 			})
 		}
+		t.Run("wildcard through a role", func(t *testing.T) {
+			output.Reset()
+			client := newStartupClient([][]string{
+				{"GRANT `wild` TO reader"},
+				{"GRANT SELECT ON system.proc* TO wild"},
+			})
+			toolset, err := openStartup(t, client, false)
+			if toolset != nil {
+				t.Fatal("NewToolset returned a toolset for a role wildcard")
+			}
+			assertUnsafeServiceRole(t, err)
+			assertStartupQueries(t, client, []string{
+				showCurrentGrantsSQL,
+				"SHOW GRANTS FOR `wild` FINAL",
+			})
+			assertNoStartupOptOut(t, output.String())
+		})
 		t.Run("partial revoke leaves the global grant", func(t *testing.T) {
 			output.Reset()
 			client := newStartupClient([][]string{{
@@ -270,6 +288,30 @@ func TestNewToolsetStartsSafeReadOnlyAccountWithoutOptOut(t *testing.T) {
 	}
 	if client.closed != 1 {
 		t.Fatalf("Close closed the connection count = %d, want 1", client.closed)
+	}
+}
+
+func TestNewToolsetAllowsWildcardThatMissesQueryText(t *testing.T) {
+	grants := []string{
+		"GRANT SELECT ON system.data* TO reader",
+		"GRANT SELECT ON system.`proc*` TO reader",
+		"GRANT SELECT ON system.Processes TO reader",
+		"GRANT SELECT ON SYSTEM.processes TO reader",
+		"GRANT SELECT ON analytics.* TO reader",
+		"GRANT SELECT ON system.databases TO reader",
+	}
+	for _, grant := range grants {
+		t.Run(grant, func(t *testing.T) {
+			client := newStartupClient([][]string{{grant}})
+			toolset, err := openStartup(t, client, false)
+			if err != nil {
+				t.Fatalf("NewToolset: %v", err)
+			}
+			if toolset == nil {
+				t.Fatal("NewToolset toolset = nil, want started toolset")
+			}
+			_ = toolset.Close()
+		})
 	}
 }
 

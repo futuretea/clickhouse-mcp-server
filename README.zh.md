@@ -101,13 +101,13 @@ allow_unsafe_database_role: false
 - 作用在 `*.*` 上的全局 DDL，或全局 `ALL` / `ALL PRIVILEGES`：`CREATE`、`ALTER`、`DROP`、`TRUNCATE`、`OPTIMIZE` 及其 DDL 子权限，包括 `ALTER HANDLER`
 - 类似的管理权限：`BACKUP`、`KILL QUERY`、`KILL TRANSACTION`、`MOVE PARTITION BETWEEN SHARDS`、`TABLE ENGINE`、`CLUSTER`、`NAMED COLLECTION ADMIN`（含 named collection 密钥）、`SET DEFINER`、`ALLOW SQL SECURITY NONE`、`SHOW CONNECTIONS` 和 `SHOW HANDLERS`
 - `AI FUNCTIONS`，或单个 AI 函数权限，例如 `aiGenerate`。以后新增的 `ai*` 权限也会被拒绝。这些语句由单元测试覆盖。ClickHouse 26.5.6.64、26.5.7.64 和 26.10.2.103 会把 `GRANT AI FUNCTIONS` 当成语法错误。
-- 作用在 `*.*`、`system.*`，或下列系统表上的 `SELECT` 或 `ALL`。这些表保存查询文本或账号凭据：`system.processes`、`system.query_log`、`system.query_thread_log`、`system.query_views_log`、`system.user_query_log`、`system.query_cache`、`system.asynchronous_inserts`、`system.asynchronous_query_log` 和 `system.users`
+- 范围能匹配下列系统表的 `SELECT` 或 `ALL`：`system.processes`、`system.query_log`、`system.query_thread_log`、`system.query_views_log`、`system.user_query_log`、`system.query_cache`、`system.asynchronous_inserts`、`system.asynchronous_query_log`、`system.users`。未加反引号、出现在名称末尾的 `*` 是前缀，因此 `system.proc*` 和 `sys*.*` 都会命中。反引号里的 `*` 是字面名称。比较区分大小写。
 
 只在自己的数据库以及 `system.databases`、`system.tables`、`system.columns` 上拥有 `SELECT` 的账号，用默认配置即可启动。`*.*` 上的 `SELECT` 不行。单独的 `SHOW` 读不了 `system.processes`。授予在单个数据库上、而不是 `*.*` 上的 DDL，不会被当成危险服务角色。查询仍然带 `readonly=1`。
 
 `allow_unsafe_database_role` 默认为 `false`。只有无法准备最小权限账号时，才在配置文件里设为 `true`，或导出 `MCP_ALLOW_UNSAFE_DATABASE_ROLE=true`。服务会打一条警告日志，并跳过这一次权限拒绝。连接被拒绝、权限探测失败，以及其他启动检查仍会中止启动。这个开关不会去掉 `readonly=1`。
 
-`readonly=1` 会拒绝写入、DDL、`SYSTEM` 语句、`CREATE USER`，以及从 `file`、`url` 表函数发起的 `SELECT`。它不会拒绝读取 `system.processes`。在 ClickHouse 26.5.6.64、26.5.7.64 和 26.10.2.103 上，拥有 `SELECT, SHOW ON *.*` 的账号能从该表读到其他会话正在执行的 SQL。`REVOKE SELECT ON system.processes` 只拿掉这一张表，`SHOW GRANTS FINAL` 里仍保留 `GRANT SELECT ON *.*`。`system.users` 等其余表仍然可读，所以启动仍会拒绝这条全局授权。
+`readonly=1` 会拒绝写入、DDL、`SYSTEM` 语句、`CREATE USER`，以及从 `file`、`url` 表函数发起的 `SELECT`。它不会拒绝读取 `system.processes`。在 ClickHouse 26.5.6.64 上，`GRANT SELECT ON system.proc*` 会原样出现在 `SHOW GRANTS` 里，并能读到其他会话正在执行的 SQL。经角色内联的同一通配符也一样。`system.data*` 能匹配 `system.databases`，但不能匹配 `system.processes`，因此这种更窄的前缀仍可启动。`REVOKE SELECT ON system.processes` 只拿掉这一张精确表，更宽的 `GRANT SELECT ON *.*` 仍留在 `SHOW GRANTS FINAL` 里。
 
 AI 函数不能代替这次授权检查。服务若打印出 `AI FUNCTIONS` 或 `ai*` 权限，启动会拒绝。启动还会从 `system.settings` 读取 `allow_experimental_ai_functions`。只有 `is_obsolete` 为 false 且该值已打开时，才会拒绝账号。26.5.6.64 和 26.5.7.64 上这个设置仍然有效。26.10.2.103 上同一行已经过时且不起作用，因此残留的打开值不会拒绝范围受限的读者。固定的集成镜像是 26.5.6.64，没有 AI 权限行。集成脚本只在该行存在时追加一次真实的 AI 拒绝检查。
 
@@ -218,7 +218,7 @@ make ci
 make test-integration
 ```
 
-该目标需要 Docker 和 `curl`，会使用随机 loopback 端口、等待 ClickHouse 健康检查，并在退出时删除容器。可设置 `CLICKHOUSE_INTEGRATION_IMAGE` 来测试另一个隔离镜像。脚本会创建用户 `mcp_reader`，并授予 `system.databases`、`system.tables` 和 `system.columns` 上的 `SELECT`，再以此用户运行测试。`*.*` 上的 `SELECT` 会被拒绝。该目标会运行完整 MCP HTTP E2E、只读工具集集成测试和 `config check --connect`。当 `system.privileges` 含有 `AI FUNCTIONS` 时，脚本还会创建范围受限且拥有该权限的 `ai_probe`，并期望启动拒绝该账号。默认镜像 ClickHouse 26.5.6.64 没有这一行，因此那里不会跑这份额外检查。它只在本地运行：`make test` 和 GitHub Actions CI 都不会执行它。
+该目标需要 Docker 和 `curl`，会使用随机 loopback 端口、等待 ClickHouse 健康检查，并在退出时删除容器。可设置 `CLICKHOUSE_INTEGRATION_IMAGE` 来测试另一个隔离镜像。脚本会创建用户 `mcp_reader`，并授予 `system.databases`、`system.tables` 和 `system.columns` 上的 `SELECT`，再以此用户运行测试。`*.*` 上的 `SELECT` 会被拒绝。它还会把 `SELECT ON system.proc*` 授给 `wild_reader`，并期望启动拒绝该账号。该目标会运行完整 MCP HTTP E2E、只读工具集集成测试和 `config check --connect`。当 `system.privileges` 含有 `AI FUNCTIONS` 时，脚本还会创建范围受限且拥有该权限的 `ai_probe`，并期望启动拒绝该账号。默认镜像 ClickHouse 26.5.6.64 没有这一行，因此那里不会跑这份额外检查。它只在本地运行：`make test` 和 GitHub Actions CI 都不会执行它。
 
 仓库仍保留 `scripts/` 和 `templates/` 中的模板资产供本地参考；它们不属于 ClickHouse server 的运行时部分。
 

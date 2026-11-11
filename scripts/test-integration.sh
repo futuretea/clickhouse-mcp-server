@@ -72,9 +72,15 @@ for _ in $(seq 1 45); do
     clickhouse_exec "GRANT SELECT ON system.databases TO mcp_reader"
     clickhouse_exec "GRANT SELECT ON system.tables TO mcp_reader"
     clickhouse_exec "GRANT SELECT ON system.columns TO mcp_reader"
+    clickhouse_exec "CREATE USER IF NOT EXISTS wild_reader IDENTIFIED WITH no_password"
+    clickhouse_exec "GRANT SELECT ON system.proc* TO wild_reader"
     MCP_CLICKHOUSE_ADDRESS="127.0.0.1:$port" \
       MCP_CLICKHOUSE_USERNAME="mcp_reader" \
       go test -count=1 -tags=integration ./cmd/mcp-server ./pkg/toolset/clickhouse ./internal/cmd
+    MCP_CLICKHOUSE_ADDRESS="127.0.0.1:$port" \
+      MCP_CLICKHOUSE_USERNAME="wild_reader" \
+      MCP_CLICKHOUSE_WILDCARD_PROBE="1" \
+      go test -count=1 -tags=integration -run TestIntegrationWildcardProcessGrantRejected ./pkg/toolset/clickhouse
     # ClickHouse 26.5 has no AI FUNCTIONS privilege row. Newer servers do.
     # The pinned default image skips this probe. A server that lists the
     # privilege must fail startup for an account that holds it.

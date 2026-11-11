@@ -98,6 +98,23 @@ func TestIntegrationReadOnlyClickHouse(t *testing.T) {
 	}
 }
 
+func TestIntegrationWildcardProcessGrantRejected(t *testing.T) {
+	if os.Getenv("MCP_CLICKHOUSE_WILDCARD_PROBE") != "1" {
+		t.Skip("wildcard process grant probe is not enabled")
+	}
+	cfg, err := config.LoadConfig("", viper.New())
+	if err != nil {
+		t.Fatalf("load integration configuration: %v", err)
+	}
+	toolset, err := NewToolset(t.Context(), cfg.ClickHouse, cfg.AllowUnsafeDatabaseRole)
+	if toolset != nil {
+		t.Fatal("NewToolset returned a toolset for a prefix wildcard on system.processes")
+	}
+	if err == nil || !strings.Contains(err.Error(), "clickhouse_unsafe_service_role") {
+		t.Fatalf("NewToolset error = %v, want clickhouse_unsafe_service_role", err)
+	}
+}
+
 func TestIntegrationAIFunctionPrivilegeRejected(t *testing.T) {
 	if os.Getenv("MCP_CLICKHOUSE_AI_PROBE") != "1" {
 		t.Skip("AI FUNCTIONS privilege probe is not enabled")
