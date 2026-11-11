@@ -83,8 +83,8 @@ func TestNewToolsetRejectsDangerousPrivileges(t *testing.T) {
 	})
 
 	t.Run("ai function privileges", func(t *testing.T) {
-		// Grant text captured from ClickHouse 26.11 SHOW GRANTS FINAL.
-		// ClickHouse 26.5 has the functions and no privilege rows.
+		// Unit fixtures for grant text. ClickHouse 26.5.6.64, 26.5.7.64, and
+		// 26.10.2.103 reject GRANT AI FUNCTIONS as a syntax error.
 		// aiNotInCatalogYet is the family rule, not a current catalog name.
 		grants := []string{
 			"GRANT AI FUNCTIONS ON *.* TO reader",
@@ -433,7 +433,7 @@ func TestNewToolsetUsesRawGrantQueryWhenAvailable(t *testing.T) {
 	responses := grantResponses([][]string{{
 		"GRANT SELECT ON analytics.* TO reader",
 	}})
-	responses = append(responses, fakeResponse{columns: []string{"setting"}, rows: [][]any{{"false"}}})
+	responses = append(responses, fakeResponse{columns: []string{"is_obsolete", "value"}, rows: [][]any{{"0", "false"}}})
 	client := &rawAwareClient{fakeClient: &fakeClient{responses: responses}}
 	toolset, err := newToolset(t.Context(), startupConfig(), false, func(config.ClickHouseConfig) (QueryClient, error) {
 		return client, nil
@@ -449,8 +449,11 @@ func TestNewToolsetUsesRawGrantQueryWhenAvailable(t *testing.T) {
 
 func TestNewToolsetRejectsEnabledAIFunctionSetting(t *testing.T) {
 	output := captureStartupLog(t)
-	responses := grantResponses([][]string{{"GRANT SELECT, SHOW ON *.* TO reader"}})
-	responses = append(responses, fakeResponse{columns: []string{"setting"}, rows: [][]any{{"true"}}})
+	responses := grantResponses([][]string{{
+		"GRANT SELECT ON analytics.* TO reader",
+		"GRANT SELECT ON system.databases TO reader",
+	}})
+	responses = append(responses, fakeResponse{columns: []string{"is_obsolete", "value"}, rows: [][]any{{"0", "true"}}})
 	client := newStartupClient(nil)
 	client.responses = responses
 	toolset, err := openStartup(t, client, false)
@@ -464,7 +467,7 @@ func TestNewToolsetRejectsEnabledAIFunctionSetting(t *testing.T) {
 
 func TestNewToolsetOptOutDoesNotSkipAISettingProbeFailure(t *testing.T) {
 	output := captureStartupLog(t)
-	responses := grantResponses([][]string{{"GRANT SELECT ON *.* TO reader"}})
+	responses := grantResponses([][]string{{"GRANT SELECT ON analytics.* TO reader"}})
 	responses = append(responses, fakeResponse{err: errors.New("setting probe failed dsn-sentinel-password")})
 	client := newStartupClient(nil)
 	client.responses = responses
@@ -514,7 +517,7 @@ func TestNewToolsetRejectsLiveAIFunctionSettingValue(t *testing.T) {
 }
 
 func TestNewToolsetAllowsReaderWhenAISettingIsUnknown(t *testing.T) {
-	responses := grantResponses([][]string{{"GRANT SELECT, SHOW ON *.* TO reader"}})
+	responses := grantResponses([][]string{{"GRANT SELECT ON analytics.* TO reader"}})
 	responses = append(responses, fakeResponse{err: errors.New("Code: 115. DB::Exception: Unknown setting allow_experimental_ai_functions. (UNKNOWN_SETTING)")})
 	client := newStartupClient(nil)
 	client.responses = responses
@@ -608,7 +611,7 @@ func captureStartupLog(t *testing.T) *bytes.Buffer {
 
 func newStartupClient(grantSets [][]string) *startupClient {
 	responses := grantResponses(grantSets)
-	responses = append(responses, fakeResponse{columns: []string{"setting"}, rows: [][]any{{"false"}}})
+	responses = append(responses, fakeResponse{columns: []string{"is_obsolete", "value"}, rows: [][]any{{"0", "false"}}})
 	return &startupClient{fakeClient: &fakeClient{responses: responses}}
 }
 

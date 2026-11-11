@@ -15,7 +15,8 @@ import (
 const (
 	startupRoleOptOutMessage = "database service role is not permitted; allow_unsafe_database_role is set, so the startup role check is skipped"
 	showCurrentGrantsSQL     = "SHOW GRANTS FINAL"
-	showAIFunctionSettingSQL = "SELECT toString(getSetting('allow_experimental_ai_functions'))"
+	showAIFunctionSettingSQL = "SELECT toString(is_obsolete), toString(getSetting('allow_experimental_ai_functions')) FROM system.settings WHERE name = 'allow_experimental_ai_functions'"
+	showAIFunctionValueSQL   = "SELECT toString(getSetting('allow_experimental_ai_functions'))"
 	maxRoleExpansions        = 8
 	unsafeServiceRoleError   = "[clickhouse_unsafe_service_role] database service role is not permitted"
 )
@@ -482,7 +483,7 @@ func hasKeywordPrefix(value, keyword string) bool {
 func privilegesUnsafe(names []string, scope string) bool {
 	global := isGlobalScope(scope)
 	for _, name := range names {
-		if privilegeUnsafe(name, global) {
+		if privilegeUnsafe(name, global) || selectsQueryText(name, scope) {
 			return true
 		}
 	}
@@ -500,13 +501,103 @@ func privilegeUnsafe(name string, global bool) bool {
 	return ok
 }
 
+// queryTextTables are system tables whose rows hold SQL text or account
+// credentials. SELECT on *.* covers every one of them. readonly=1 does not
+// hide in-flight queries in system.processes.
+var queryTextTables = map[string]struct{}{
+	"processes":              {},
+	"query_log":              {},
+	"query_thread_log":       {},
+	"query_views_log":        {},
+	"user_query_log":         {},
+	"query_cache":            {},
+	"asynchronous_inserts":   {},
+	"asynchronous_query_log": {},
+	"users":                  {},
+}
+
+// selectsQueryText reports a SELECT or ALL grant that can read query text or
+// account credentials. A partial REVOKE does not remove the global GRANT line
+// from SHOW GRANTS FINAL, and it leaves the other tables readable.
+func selectsQueryText(name, scope string) bool {
+	switch name {
+	case "SELECT", "ALL", "ALL PRIVILEGES":
+	default:
+		return false
+	}
+	normalized := normalizeScope(scope)
+	if normalized == "*.*" {
+		return true
+	}
+	parts := strings.Split(normalized, ".")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return true
+	}
+	if !strings.EqualFold(parts[0], "system") {
+		return false
+	}
+	if parts[1] == "*" {
+		return true
+	}
+	_, ok := queryTextTables[strings.ToLower(parts[1])]
+	return ok
+}
+
 // aiFunctionPrivilege reports the AI FUNCTIONS group and one AI function
 // privilege. SHOW GRANTS prints the group as "AI FUNCTIONS" and each function
 // as a single token such as "aiGenerate". normalizePrivilege uppercases that
 // token to "AIGENERATE". These are SELECT functions, so readonly=1 does not
-// stop them from sending prompt text to an external endpoint.
+// stop them once a server actually grants the privilege.
 func (t *Toolset) aiFunctionsEnabledBySetting(ctx context.Context) (bool, error) {
-	rows, err := t.queryStartup(ctx, showAIFunctionSettingSQL)
+	enabled, err := t.readAIFunctionSetting(ctx, showAIFunctionSettingSQL)
+	if err != nil && obsoleteColumnMissing(err) {
+		return t.readAIFunctionValue(ctx)
+	}
+	return enabled, err
+}
+
+func (t *Toolset) readAIFunctionSetting(ctx context.Context, query string) (bool, error) {
+	rows, err := t.queryStartup(ctx, query)
+	if err != nil {
+		if unknownSetting(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	defer func() { _ = rows.Close() }()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+	if len(rows.Columns()) < 2 {
+		return false, errors.New("AI function setting probe returned too few columns")
+	}
+	_, destinations := scanDestinations(len(rows.Columns()), rows.ScanTypes())
+	if err := rows.Scan(destinations...); err != nil {
+		return false, err
+	}
+	obsolete, err := grantText(scannedValue(destinations[0]))
+	if err != nil {
+		return false, err
+	}
+	value, err := grantText(scannedValue(destinations[1]))
+	if err != nil {
+		return false, err
+	}
+	obsoleteFlag, err := settingFlag(obsolete)
+	if err != nil {
+		return false, err
+	}
+	if obsoleteFlag {
+		return false, nil
+	}
+	return settingFlag(value)
+}
+
+func (t *Toolset) readAIFunctionValue(ctx context.Context) (bool, error) {
+	rows, err := t.queryStartup(ctx, showAIFunctionValueSQL)
 	if err != nil {
 		if unknownSetting(err) {
 			return false, nil
@@ -527,10 +618,14 @@ func (t *Toolset) aiFunctionsEnabledBySetting(ctx context.Context) (bool, error)
 	if err := rows.Scan(destinations...); err != nil {
 		return false, err
 	}
-	text, err := grantText(scannedValue(destinations[0]))
+	value, err := grantText(scannedValue(destinations[0]))
 	if err != nil {
 		return false, err
 	}
+	return settingFlag(value)
+}
+
+func settingFlag(text string) (bool, error) {
 	switch strings.ToLower(text) {
 	case "1", "true":
 		return true, nil
@@ -539,6 +634,17 @@ func (t *Toolset) aiFunctionsEnabledBySetting(ctx context.Context) (bool, error)
 	default:
 		return false, fmt.Errorf("unrecognized AI function setting %q", text)
 	}
+}
+
+func obsoleteColumnMissing(err error) bool {
+	text := err.Error()
+	if !strings.Contains(text, "is_obsolete") {
+		return false
+	}
+	return strings.Contains(text, "UNKNOWN_IDENTIFIER") ||
+		strings.Contains(text, "NO_SUCH_COLUMN") ||
+		strings.Contains(text, "Missing columns") ||
+		strings.Contains(text, "There is no column")
 }
 
 func unknownSetting(err error) bool {
@@ -557,6 +663,10 @@ func aiFunctionPrivilege(name string) bool {
 }
 
 func isGlobalScope(scope string) bool {
+	return normalizeScope(scope) == "*.*"
+}
+
+func normalizeScope(scope string) string {
 	var normalized strings.Builder
 	normalized.Grow(len(scope))
 	for _, r := range scope {
@@ -565,7 +675,7 @@ func isGlobalScope(scope string) bool {
 		}
 		normalized.WriteRune(r)
 	}
-	return normalized.String() == "*.*"
+	return normalized.String()
 }
 
 func splitPrivileges(list string) ([]string, error) {

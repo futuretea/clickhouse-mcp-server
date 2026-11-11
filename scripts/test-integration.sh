@@ -69,7 +69,9 @@ fi
 for _ in $(seq 1 45); do
   if curl --fail --silent --show-error "http://127.0.0.1:$port/ping" >/dev/null; then
     clickhouse_exec "CREATE USER IF NOT EXISTS mcp_reader IDENTIFIED WITH no_password"
-    clickhouse_exec "GRANT SELECT, SHOW ON *.* TO mcp_reader"
+    clickhouse_exec "GRANT SELECT ON system.databases TO mcp_reader"
+    clickhouse_exec "GRANT SELECT ON system.tables TO mcp_reader"
+    clickhouse_exec "GRANT SELECT ON system.columns TO mcp_reader"
     MCP_CLICKHOUSE_ADDRESS="127.0.0.1:$port" \
       MCP_CLICKHOUSE_USERNAME="mcp_reader" \
       go test -count=1 -tags=integration ./cmd/mcp-server ./pkg/toolset/clickhouse ./internal/cmd
@@ -82,8 +84,10 @@ for _ in $(seq 1 45); do
       printf '%s\n' 'AI FUNCTIONS privilege is absent; unit tests cover that grant text'
     else
       clickhouse_exec "CREATE USER IF NOT EXISTS ai_probe IDENTIFIED WITH no_password"
+      clickhouse_exec "GRANT SELECT ON system.databases TO ai_probe"
+      clickhouse_exec "GRANT SELECT ON system.tables TO ai_probe"
+      clickhouse_exec "GRANT SELECT ON system.columns TO ai_probe"
       clickhouse_exec "GRANT AI FUNCTIONS ON *.* TO ai_probe"
-      clickhouse_exec "GRANT SELECT ON *.* TO ai_probe"
       MCP_CLICKHOUSE_ADDRESS="127.0.0.1:$port" \
         MCP_CLICKHOUSE_USERNAME="ai_probe" \
         MCP_CLICKHOUSE_AI_PROBE="1" \
