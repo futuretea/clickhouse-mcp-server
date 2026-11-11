@@ -107,6 +107,49 @@ func TestNewToolsetRejectsDangerousPrivileges(t *testing.T) {
 		}
 	})
 
+	t.Run("query text grants", func(t *testing.T) {
+		grants := []string{
+			"GRANT SELECT, SHOW ON *.* TO reader",
+			"GRANT SELECT ON system.* TO reader",
+			"GRANT SELECT ON system.processes TO reader",
+			"GRANT SELECT ON system.query_log TO reader",
+			"GRANT SELECT ON system.query_thread_log TO reader",
+			"GRANT SELECT ON system.query_views_log TO reader",
+			"GRANT SELECT ON system.user_query_log TO reader",
+			"GRANT SELECT ON system.query_cache TO reader",
+			"GRANT SELECT ON system.asynchronous_inserts TO reader",
+			"GRANT SELECT ON system.asynchronous_query_log TO reader",
+			"GRANT SELECT ON system.users TO reader",
+			"GRANT ALL ON system.processes TO reader",
+			"GRANT SELECT ON *.* TO reader",
+		}
+		for _, grant := range grants {
+			t.Run(grant, func(t *testing.T) {
+				output.Reset()
+				client := newStartupClient([][]string{{grant}})
+				toolset, err := openStartup(t, client, false)
+				if toolset != nil {
+					t.Fatal("NewToolset returned a toolset for a query-text grant")
+				}
+				assertUnsafeServiceRole(t, err)
+				assertNoStartupOptOut(t, output.String())
+			})
+		}
+		t.Run("partial revoke leaves the global grant", func(t *testing.T) {
+			output.Reset()
+			client := newStartupClient([][]string{{
+				"GRANT SHOW, SELECT ON *.* TO reader",
+				"REVOKE SELECT ON system.processes FROM reader",
+			}})
+			toolset, err := openStartup(t, client, false)
+			if toolset != nil {
+				t.Fatal("NewToolset returned a toolset after a partial revoke of system.processes")
+			}
+			assertUnsafeServiceRole(t, err)
+			assertNoStartupOptOut(t, output.String())
+		})
+	})
+
 	t.Run("realistic default user grants", func(t *testing.T) {
 		output.Reset()
 		client := newStartupClient([][]string{{
@@ -430,6 +473,43 @@ func TestNewToolsetOptOutDoesNotSkipAISettingProbeFailure(t *testing.T) {
 		t.Fatal("NewToolset returned a toolset after the AI setting probe failed")
 	}
 	assertStartupFailure(t, err)
+	assertNoStartupOptOut(t, output.String())
+}
+
+func TestNewToolsetAllowsObsoleteAIFunctionSetting(t *testing.T) {
+	responses := grantResponses([][]string{{
+		"GRANT SELECT ON analytics.* TO reader",
+		"GRANT SELECT ON system.databases TO reader",
+		"GRANT SELECT ON system.tables TO reader",
+		"GRANT SELECT ON system.columns TO reader",
+	}})
+	responses = append(responses, fakeResponse{columns: []string{"is_obsolete", "value"}, rows: [][]any{{"1", "true"}}})
+	client := newStartupClient(nil)
+	client.responses = responses
+	toolset, err := openStartup(t, client, false)
+	if err != nil {
+		t.Fatalf("NewToolset: %v", err)
+	}
+	if toolset == nil {
+		t.Fatal("NewToolset toolset = nil, want started toolset")
+	}
+	_ = toolset.Close()
+}
+
+func TestNewToolsetRejectsLiveAIFunctionSettingValue(t *testing.T) {
+	output := captureStartupLog(t)
+	responses := grantResponses([][]string{{
+		"GRANT SELECT ON analytics.* TO reader",
+		"GRANT SELECT ON system.databases TO reader",
+	}})
+	responses = append(responses, fakeResponse{columns: []string{"is_obsolete", "value"}, rows: [][]any{{"0", "true"}}})
+	client := newStartupClient(nil)
+	client.responses = responses
+	toolset, err := openStartup(t, client, false)
+	if toolset != nil {
+		t.Fatal("NewToolset returned a toolset while the live AI setting is enabled")
+	}
+	assertUnsafeServiceRole(t, err)
 	assertNoStartupOptOut(t, output.String())
 }
 
