@@ -122,6 +122,12 @@ func TestNewToolsetRejectsDangerousPrivileges(t *testing.T) {
 			"GRANT SELECT ON system.users TO reader",
 			"GRANT ALL ON system.processes TO reader",
 			"GRANT SELECT ON *.* TO reader",
+			"GRANT SELECT ON system.proc* TO reader",
+			"GRANT SELECT ON system.user* TO reader",
+			"GRANT ALL ON system.proc* TO reader",
+			"GRANT SELECT ON sys*.* TO reader",
+			"GRANT SELECT ON s*.* TO reader",
+			"GRANT SELECT(query, user) ON system.processes TO reader",
 		}
 		for _, grant := range grants {
 			t.Run(grant, func(t *testing.T) {
