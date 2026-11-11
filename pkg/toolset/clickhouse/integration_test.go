@@ -4,6 +4,7 @@ package clickhouse
 
 import (
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
@@ -17,7 +18,7 @@ func TestIntegrationReadOnlyClickHouse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load integration configuration: %v", err)
 	}
-	toolset, err := NewToolset(cfg.ClickHouse)
+	toolset, err := NewToolset(t.Context(), cfg.ClickHouse, cfg.AllowUnsafeDatabaseRole)
 	if err != nil {
 		t.Fatalf("create ClickHouse toolset: %v", err)
 	}
@@ -89,7 +90,51 @@ func TestIntegrationReadOnlyClickHouse(t *testing.T) {
 	_, err = handlers["clickhouse_query"](t.Context(), map[string]any{
 		"query": "CREATE TEMPORARY TABLE clickhouse_mcp_readonly_test (id UInt8)",
 	})
-	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "readonly") {
-		t.Fatalf("temporary DDL error = %v, want ClickHouse readonly rejection", err)
+	// CREATE TEMPORARY TABLE is global-only. Granting it on *.* is rejected at
+	// startup, so this SELECT/SHOW account is denied the privilege (code 497)
+	// rather than reaching the readonly=1 check.
+	if err == nil || !temporaryDDLDenied(err.Error()) {
+		t.Fatalf("temporary DDL error = %v, want ClickHouse ACCESS_DENIED for CREATE TEMPORARY TABLE", err)
 	}
+}
+
+func TestIntegrationWildcardProcessGrantRejected(t *testing.T) {
+	if os.Getenv("MCP_CLICKHOUSE_WILDCARD_PROBE") != "1" {
+		t.Skip("wildcard process grant probe is not enabled")
+	}
+	cfg, err := config.LoadConfig("", viper.New())
+	if err != nil {
+		t.Fatalf("load integration configuration: %v", err)
+	}
+	toolset, err := NewToolset(t.Context(), cfg.ClickHouse, cfg.AllowUnsafeDatabaseRole)
+	if toolset != nil {
+		t.Fatal("NewToolset returned a toolset for a prefix wildcard on system.processes")
+	}
+	if err == nil || !strings.Contains(err.Error(), "clickhouse_unsafe_service_role") {
+		t.Fatalf("NewToolset error = %v, want clickhouse_unsafe_service_role", err)
+	}
+}
+
+func TestIntegrationAIFunctionPrivilegeRejected(t *testing.T) {
+	if os.Getenv("MCP_CLICKHOUSE_AI_PROBE") != "1" {
+		t.Skip("AI FUNCTIONS privilege probe is not enabled")
+	}
+	cfg, err := config.LoadConfig("", viper.New())
+	if err != nil {
+		t.Fatalf("load integration configuration: %v", err)
+	}
+	toolset, err := NewToolset(t.Context(), cfg.ClickHouse, cfg.AllowUnsafeDatabaseRole)
+	if toolset != nil {
+		t.Fatal("NewToolset returned a toolset for an AI function privilege")
+	}
+	if err == nil || !strings.Contains(err.Error(), "clickhouse_unsafe_service_role") {
+		t.Fatalf("NewToolset error = %v, want clickhouse_unsafe_service_role", err)
+	}
+}
+
+func temporaryDDLDenied(message string) bool {
+	text := strings.ToLower(message)
+	return strings.Contains(text, "access_denied") &&
+		strings.Contains(text, "code: 497") &&
+		strings.Contains(text, "create temporary table")
 }

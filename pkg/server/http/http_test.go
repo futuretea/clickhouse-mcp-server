@@ -188,11 +188,7 @@ func TestServeListenerShutdown(t *testing.T) {
 
 func newClickHouseToolset(t *testing.T) *clickhousetoolset.Toolset {
 	t.Helper()
-	toolset, err := clickhousetoolset.NewToolset(config.ClickHouseConfig{Address: "127.0.0.1:8123", Database: "default"})
-	if err != nil {
-		t.Fatalf("NewToolset: %v", err)
-	}
-	return toolset
+	return clickhousetoolset.NewCatalogToolset(config.ClickHouseConfig{Address: "127.0.0.1:8123", Database: "default"})
 }
 
 type responseRecorder struct {

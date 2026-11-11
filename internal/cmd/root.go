@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"io"
 
@@ -82,22 +83,43 @@ func loadCLIConfig(cmd *cobra.Command, cfgFile string, v *viper.Viper) (*config.
 	return cfg, nil
 }
 
-func defaultToolsets(cfg *config.StaticConfig) ([]toolset.Toolset, error) {
+func catalogToolsets(cfg *config.StaticConfig) ([]toolset.Toolset, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("static config is required")
 	}
-	clickHouse, err := clickhousetoolset.NewToolset(cfg.ClickHouse)
+	return []toolset.Toolset{clickhousetoolset.NewCatalogToolset(cfg.ClickHouse)}, nil
+}
+
+func runtimeToolsets(ctx context.Context, cfg *config.StaticConfig) ([]toolset.Toolset, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("static config is required")
+	}
+	clickHouse, err := clickhousetoolset.NewToolset(ctx, cfg.ClickHouse, cfg.AllowUnsafeDatabaseRole)
 	if err != nil {
-		return nil, fmt.Errorf("configure ClickHouse tools: %w", err)
+		return nil, err
 	}
 	return []toolset.Toolset{clickHouse}, nil
 }
 
+func closeToolsets(toolsets []toolset.Toolset) {
+	for _, configured := range toolsets {
+		closer, ok := configured.(interface{ Close() error })
+		if !ok {
+			continue
+		}
+		_ = closer.Close()
+	}
+}
+
 func buildToolCatalog(cfg *config.StaticConfig) ([]toolset.ServerTool, error) {
-	toolsets, err := defaultToolsets(cfg)
+	toolsets, err := catalogToolsets(cfg)
 	if err != nil {
 		return nil, err
 	}
+	return buildToolCatalogForToolsets(cfg, toolsets)
+}
+
+func buildToolCatalogForToolsets(cfg *config.StaticConfig, toolsets []toolset.Toolset) ([]toolset.ServerTool, error) {
 	return toolcatalog.Build(toolsets, toolset.FilterOptions{
 		EnabledTools:    cfg.EnabledTools,
 		DisabledTools:   cfg.DisabledTools,

@@ -28,19 +28,25 @@ type Toolset struct {
 	client   QueryClient
 }
 
-// NewToolset creates a ClickHouse toolset backed by the HTTP(S) driver.
-func NewToolset(cfg config.ClickHouseConfig) (*Toolset, error) {
-	if err := cfg.Validate(); err != nil {
-		return nil, err
-	}
+// NewToolset connects to ClickHouse and rejects dangerous service accounts
+// before any tool can run a query. allowUnsafeDatabaseRole skips only that
+// privilege rejection; connection and grant-probe failures still abort.
+func NewToolset(ctx context.Context, cfg config.ClickHouseConfig, allowUnsafeDatabaseRole bool) (*Toolset, error) {
+	return newToolset(ctx, cfg, allowUnsafeDatabaseRole, openQueryClient)
+}
+
+// NewCatalogToolset returns tool definitions without connecting to ClickHouse.
+// Listing and describing tools use it so those commands do not open a session
+// or run the startup privilege check.
+func NewCatalogToolset(cfg config.ClickHouseConfig) *Toolset {
 	if strings.TrimSpace(cfg.Database) == "" {
 		cfg.Database = "default"
 	}
-	client, err := newDriverClient(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("create ClickHouse HTTP client: %w", err)
-	}
-	return newToolsetWithClient(cfg.Address, cfg.Database, cfg.Password, client), nil
+	return newToolsetWithClient(cfg.Address, cfg.Database, cfg.Password, unavailableClient{})
+}
+
+func openQueryClient(cfg config.ClickHouseConfig) (QueryClient, error) {
+	return newDriverClient(cfg)
 }
 
 func newToolsetWithClient(address, database, password string, client QueryClient) *Toolset {
