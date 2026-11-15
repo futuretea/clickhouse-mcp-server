@@ -51,7 +51,7 @@ All successful tool calls return JSON in MCP text content.
 | `clickhouse_describe_table` | required `table`, optional `database` | column name, type, defaults, and comment |
 | `clickhouse_query` | required `query`, optional positive integer `max_rows` | columns, display-string rows, returned `row_count`, and `truncated` |
 
-`clickhouse_query` defaults to 1,000 rows. The server reads one additional row to report `truncated: true`; that extra row is not returned. Each non-null cell is rendered as a string so clients receive a stable JSON shape.
+`clickhouse_query` defaults to 1,000 rows. The server reads one additional row to report `truncated: true`; that extra row is not returned. While output masking is off, each non-null cell is rendered as a string. While it is on, an unmatched cell keeps that display text, and a matched nested map or slice is JSON.
 
 The query tool accepts exactly one statement. Semicolons in strings, quoted identifiers, and SQL comments are allowed; a second statement is rejected before it reaches ClickHouse. Every query is sent with ClickHouse `readonly=1`. That setting rejects writes, DDL, `SYSTEM` statements, user administration, and source table functions such as `file` and `url`. It does not hide in-flight SQL in `system.processes`, and it does not reject AI functions. Startup rejects accounts that can administer ClickHouse, read external sources, run global DDL, read other sessions' query text, or call AI functions. See [Service account](#service-account).
 
@@ -88,8 +88,35 @@ allow_unsafe_database_role: false
 | Tool filters | `enabled_domains` | `MCP_ENABLED_DOMAINS` | empty | Comma-separated tool domains to enable |
 | Tool filters | `disabled_domains` | `MCP_DISABLED_DOMAINS` | empty | Comma-separated tool domains to disable |
 | Server | `allow_unsafe_database_role` | `MCP_ALLOW_UNSAFE_DATABASE_ROLE` | `false` | Skip only the startup unsafe-privilege rejection |
+| Output | `masking` | `MCP_MASKING_JSON` | disabled | Optional output masking. A present variable replaces the whole object. |
 
 The server never logs the configured password. `secure: true` protects the connection to ClickHouse; it does not add TLS or authentication to the MCP HTTP endpoint.
+
+### Output masking
+
+Masking stays off unless `masking.enabled` is `true`. An absent `masking` object leaves tool results, logs, and errors unchanged.
+
+```yaml
+masking:
+  enabled: true
+  placeholder: "[masked]"
+  names: ["synthetic_field"]
+  name_patterns: ["token_.+"]
+  values: ["synthetic-token-value"]
+  value_patterns: ["sk_live_[0-9]+"]
+```
+
+`MCP_MASKING_JSON`, when set, replaces that whole object. An empty value is rejected. An unset variable leaves the YAML object in place. Other `MCP_*` variables do not merge into the object. `enabled: true` with no rules is rejected. Unknown JSON fields are rejected. The error text is `invalid masking config` and does not include the document.
+
+`config check` prints `masking=enabled` or `masking=disabled`. The line is present when masking is off, as `masking=disabled source=default`. It does not print the rules. When masking is on, displayed configuration values are masked too.
+
+Name patterns are parsed on their own and then anchored to the whole field name. A fragment such as `a)|(b` is rejected. A grouped pattern such as `(?:a)|(b)` matches only the whole names `a` and `b`. Value literals and value patterns are substring matches on the original text, including a one-character literal. RE2 returns the leftmost-first match and does not look for a longer alternative. A matched string becomes the placeholder. A matched number, boolean, or other non-string becomes JSON null. An original null stays null. A null in a result can be a database NULL or a redacted value, and the JSON type can change when a rule matches.
+
+The server applies field rules to scanned driver values before `fmt.Sprint`. Unmatched cells keep the previous display text. Matched nested maps and slices become JSON. Strings and JSON text use those rules. ClickHouse does not decode a base64 string before masking it. A value rule that hits the original display text of a number, bool, time, duration, IP address, UUID, or geo value nulls the whole value. An unmatched value keeps that `fmt.Sprint` text. A JSON number keeps the digits from the document, including trailing zeros. A JSON value is counted again as its container, so it can exhaust the shared budget before a plain string of the same size. A name rule nulls the whole value. ClickHouse JSON and Variant values are walked. One set of size and node limits covers the whole tool result. An unknown value, a walk past the depth or node bound, or output past 1 MiB fails the result with `[clickhouse_masking_failed] result was not returned`. No partial result is returned.
+
+This does not find every private value. Compressed payloads and encodings the server does not recognize are not rewritten in place. Query text sent to ClickHouse is not modified.
+
+While masking is on, query, startup, setting, and connection errors omit driver and setting text. HTTP debug logs use a route class (`mcp`, `sse`, `message`, `healthz`, or `other`) instead of the request path. The placeholder and those fixed errors are not treated as stored data. A short literal that also occurs inside them can remain there.
 
 ### Service account
 
@@ -138,7 +165,7 @@ export MCP_CLICKHOUSE_ADDRESS=127.0.0.1:8123
 ./bin/clickhouse-mcp-server config check
 ```
 
-The command prints the 14 configuration fields in a stable order with their source (`flag`, `environment`, `YAML`, or `default`). Passwords are reported only as `set` or `unset`. `sse_base_url` removes query and fragment values and redacts URL userinfo before display.
+The command prints the 15 configuration fields in a stable order with their source (`flag`, `environment`, `YAML`, or `default`). Passwords are reported only as `set` or `unset`. `masking` is `enabled` or `disabled` and does not include the rules. `sse_base_url` removes query and fragment values and redacts URL userinfo before display.
 
 Use `--connect` only when you intentionally want one ClickHouse HTTP(S) `Ping`; it opens, pings, and closes a short-lived connection without starting the MCP server.
 
@@ -200,6 +227,9 @@ Both commands launch the `mcp` command. Arguments after the package or image are
 - Connection failure: check the address, `secure` value, ClickHouse HTTP port, and network reachability.
 - Query rejection: verify the statement is a single read-only query and that the configured ClickHouse user has access to the database.
 - `truncated: true`: lower the result size in SQL or increase `max_rows` deliberately.
+- `invalid masking config`: the masking document is empty, unknown, or enabled with no rules. The message does not quote the document.
+- `[clickhouse_masking_failed]`: the result could not be masked inside the bounds, or the value type is not supported. No partial result is returned.
+- `[clickhouse_query_failed]`, `[clickhouse_startup_failed]`, and `[clickhouse_connect_failed]`: masking is on, so the server omits driver and setting text.
 
 ## Development
 

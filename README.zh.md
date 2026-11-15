@@ -51,7 +51,7 @@ MCP 服务本身不做认证，默认只监听 `127.0.0.1`。除非另行设计�
 | `clickhouse_describe_table` | 必填 `table`，可选 `database` | 列名、类型、默认值和注释 |
 | `clickhouse_query` | 必填 `query`，可选正整数 `max_rows` | 列、显示字符串行、实际返回的 `row_count` 和 `truncated` |
 
-`clickhouse_query` 默认最多返回 1,000 行。服务会额外读取一行判断 `truncated: true`，但该额外行不会出现在结果中。每个非空单元格都会显示为字符串，使 JSON 结构稳定。
+`clickhouse_query` 默认最多返回 1,000 行。服务会额外读取一行判断 `truncated: true`，但该额外行不会出现在结果中。输出脱敏关闭时，每个非空单元格都显示为字符串。打开后，未命中的单元格仍保持该显示文本，命中的嵌套 map 或 slice 则输出 JSON。
 
 查询工具只接受一条 SQL。字符串、quoted identifier 和 SQL 注释中的分号可以使用；第二条语句会在到达 ClickHouse 前被拒绝。所有查询均携带 ClickHouse 的 `readonly=1` 设置。该设置会拒绝写入、DDL、`SYSTEM` 语句、用户管理，以及 `file`、`url` 这类外部数据源表函数。它藏不住 `system.processes` 里正在执行的 SQL，也不会拒绝 AI 函数。启动时还会拒绝可以管理 ClickHouse、读取外部数据源、执行全局 DDL、读取其他会话的查询文本或调用 AI 函数的账号。参见[服务账号](#服务账号)。
 
@@ -88,8 +88,35 @@ allow_unsafe_database_role: false
 | 工具筛选 | `enabled_domains` | `MCP_ENABLED_DOMAINS` | 空 | 以逗号分隔的允许工具域 |
 | 工具筛选 | `disabled_domains` | `MCP_DISABLED_DOMAINS` | 空 | 以逗号分隔的禁止工具域 |
 | 服务运行 | `allow_unsafe_database_role` | `MCP_ALLOW_UNSAFE_DATABASE_ROLE` | `false` | 仅跳过启动时的危险权限拒绝 |
+| 输出 | `masking` | `MCP_MASKING_JSON` | 关闭 | 可选输出脱敏。变量存在时替换整个对象。 |
 
 服务不会记录配置的密码。`secure: true` 只保护到 ClickHouse 的连接；它不会为 MCP HTTP 端点增加 TLS 或认证。
+
+### 输出脱敏
+
+只有 `masking.enabled` 为 `true` 时才脱敏。没有 `masking` 对象时，工具结果、日志和错误都保持原样。
+
+```yaml
+masking:
+  enabled: true
+  placeholder: "[masked]"
+  names: ["synthetic_field"]
+  name_patterns: ["token_.+"]
+  values: ["synthetic-token-value"]
+  value_patterns: ["sk_live_[0-9]+"]
+```
+
+设置了 `MCP_MASKING_JSON` 时，它替换整个对象。空值会被拒绝。未设置该变量时保留 YAML 对象。其他 `MCP_*` 变量不会并入这个对象。`enabled: true` 但没有任何规则会被拒绝。未知 JSON 字段会被拒绝。错误文本是 `invalid masking config`，不包含配置文档。
+
+`config check` 打印 `masking=enabled` 或 `masking=disabled`。脱敏关闭时这一行仍在，内容是 `masking=disabled source=default`。它不打印规则。脱敏打开时，配置检查里显示的配置值也会被脱敏。
+
+名字模式会先单独解析，再锚定到整个字段名。`a)|(b` 这种片段会被拒绝。`(?:a)|(b)` 只匹配完整名字 `a` 和 `b`。值字面量和值模式是原文上的子串匹配，包含单字符字面量。RE2 返回最左优先的匹配，不会再找更长的分支。命中的字符串变成占位符。命中的数字、布尔值或其他非字符串变成 JSON null。原来的 null 仍是 null。结果里的 null 可能是数据库 NULL，也可能是被抹掉的值。规则命中时，JSON 类型可能改变。
+
+服务在 `fmt.Sprint` 之前对驱动扫描值应用字段规则。未命中的单元格保持原来的显示文本。命中的嵌套 map 和 slice 变成 JSON。字符串和 JSON 文本走这些规则。ClickHouse 不会在脱敏前把 base64 字符串解码。值规则命中数字、布尔值、时间、时长、IP、UUID 或地理值的原始显示文本时，整个值变成 null。未命中的值保持原来的 `fmt.Sprint` 文本。JSON 数字保留文档里的数字，包括末尾的 0。JSON 值会再按容器计一次，因此同样大小的 JSON 可能比普通字符串更早用完共享预算。名字规则会把整个值变成 null。ClickHouse JSON 和 Variant 会被遍历。同一次工具结果共用一套大小和节点限制。未知类型、超过深度或节点上限、或输出超过 1 MiB 时，结果失败，错误为 `[clickhouse_masking_failed] result was not returned`。不会返回部分结果。
+
+这不能找出所有私密值。压缩数据和服务器不认识的编码不会被就地改写。发给 ClickHouse 的查询文本不会被修改。
+
+脱敏打开时，查询、启动、设置和连接错误不再包含驱动或设置文本。HTTP 调试日志用路由类别（`mcp`、`sse`、`message`、`healthz` 或 `other`）代替请求路径。占位符和这些固定错误不当作存储的数据。占位符或固定错误里碰巧包含的短字面量仍可能留在那里。
 
 ### 服务账号
 
@@ -138,7 +165,7 @@ export MCP_CLICKHOUSE_ADDRESS=127.0.0.1:8123
 ./bin/clickhouse-mcp-server config check
 ```
 
-命令按稳定顺序输出 14 个配置字段及其来源（`flag`、`environment`、`YAML` 或 `default`）。密码只显示 `set` 或 `unset`；`sse_base_url` 在显示前会删除 query 和 fragment，并脱敏 URL userinfo。
+命令按稳定顺序输出 15 个配置字段及其来源（`flag`、`environment`、`YAML` 或 `default`）。密码只显示 `set` 或 `unset`。`masking` 只显示 `enabled` 或 `disabled`，不包含规则。`sse_base_url` 在显示前会删除 query 和 fragment，并脱敏 URL userinfo。
 
 只有明确需要一次 ClickHouse HTTP(S) `Ping` 时才追加 `--connect`。它会打开、Ping 并关闭一个短生命周期连接，不会启动 MCP 服务。
 
@@ -200,6 +227,9 @@ docker run --rm -i ghcr.io/futuretea/clickhouse-mcp-server:v<version>
 - 连接失败：检查地址、`secure` 值、ClickHouse HTTP 端口和网络可达性。
 - 查询被拒绝：确认 SQL 只有一条只读语句，且 ClickHouse 用户有目标数据库的访问权限。
 - `truncated: true`：在 SQL 中减少结果集，或有意识地提高 `max_rows`。
+- `invalid masking config`：脱敏文档为空、包含未知字段，或已启用但没有规则。该消息不会引用文档内容。
+- `[clickhouse_masking_failed]`：结果无法在限制内完成脱敏，或值类型不受支持。不会返回部分结果。
+- `[clickhouse_query_failed]`、`[clickhouse_startup_failed]` 和 `[clickhouse_connect_failed]`：脱敏已打开，因此服务省略驱动和设置文本。
 
 ## 开发
 

@@ -13,3 +13,10 @@ clickhouse:
   username: ""
   password: ""
 allow_unsafe_database_role: false
+# masking:
+#   enabled: false
+#   placeholder: "[masked]"
+#   names: ["synthetic_field"]
+#   name_patterns: ["token_.+"]
+#   values: ["synthetic-token-value"]
+#   value_patterns: ["sk_live_[0-9]+"]

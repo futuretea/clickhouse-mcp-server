@@ -90,11 +90,16 @@ func catalogToolsets(cfg *config.StaticConfig) ([]toolset.Toolset, error) {
 	return []toolset.Toolset{clickhousetoolset.NewCatalogToolset(cfg.ClickHouse)}, nil
 }
 
+var runtimeToolsetsOverride func(context.Context, *config.StaticConfig) ([]toolset.Toolset, error)
+
 func runtimeToolsets(ctx context.Context, cfg *config.StaticConfig) ([]toolset.Toolset, error) {
+	if runtimeToolsetsOverride != nil {
+		return runtimeToolsetsOverride(ctx, cfg)
+	}
 	if cfg == nil {
 		return nil, fmt.Errorf("static config is required")
 	}
-	clickHouse, err := clickhousetoolset.NewToolset(ctx, cfg.ClickHouse, cfg.AllowUnsafeDatabaseRole)
+	clickHouse, err := clickhousetoolset.NewToolset(ctx, cfg.ClickHouse, cfg.AllowUnsafeDatabaseRole, cfg.Masking)
 	if err != nil {
 		return nil, err
 	}

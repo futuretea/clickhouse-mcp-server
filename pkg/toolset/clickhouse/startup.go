@@ -10,6 +10,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/futuretea/clickhouse-mcp-server/pkg/core/config"
+	"github.com/futuretea/clickhouse-mcp-server/pkg/core/masking"
 )
 
 const (
@@ -234,7 +235,7 @@ func (unavailableClient) Query(context.Context, string, map[string]string) (RowC
 	return nil, errors.New("ClickHouse client is not connected")
 }
 
-func newToolset(ctx context.Context, cfg config.ClickHouseConfig, allowUnsafeDatabaseRole bool, open func(config.ClickHouseConfig) (QueryClient, error)) (*Toolset, error) {
+func newToolset(ctx context.Context, cfg config.ClickHouseConfig, allowUnsafeDatabaseRole bool, policy masking.Policy, open func(config.ClickHouseConfig) (QueryClient, error)) (*Toolset, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -245,16 +246,16 @@ func newToolset(ctx context.Context, cfg config.ClickHouseConfig, allowUnsafeDat
 		ctx = context.Background()
 	}
 	if open == nil {
-		return nil, startupFailure(cfg.Password, errors.New("client is not configured"))
+		return nil, startupFailure(cfg.Password, errors.New("client is not configured"), policy)
 	}
 	client, err := open(cfg)
 	if err != nil || client == nil {
 		if err == nil {
 			err = errors.New("client is not configured")
 		}
-		return nil, startupFailure(cfg.Password, err)
+		return nil, startupFailure(cfg.Password, err, policy)
 	}
-	toolset := newToolsetWithClient(cfg.Address, cfg.Database, cfg.Password, client)
+	toolset := newToolsetWithClient(cfg.Address, cfg.Database, cfg.Password, client, policy)
 	if err := toolset.verifyStartup(ctx, allowUnsafeDatabaseRole); err != nil {
 		_ = toolset.Close()
 		return nil, err
@@ -278,10 +279,13 @@ func (t *Toolset) verifyStartup(ctx context.Context, allowUnsafeDatabaseRole boo
 }
 
 func (t *Toolset) startupFailure(err error) error {
-	return startupFailure(t.password, err)
+	return startupFailure(t.password, err, t.policy)
 }
 
-func startupFailure(password string, err error) error {
+func startupFailure(password string, err error, policy masking.Policy) error {
+	if policy.Enabled() {
+		return errors.New(startupFailedMessage)
+	}
 	return fmt.Errorf("[clickhouse_startup_failed] ClickHouse startup check failed: %s", redactSecret(err.Error(), password))
 }
 
@@ -689,14 +693,14 @@ func (t *Toolset) readAIFunctionSetting(ctx context.Context, query string) (bool
 	if err != nil {
 		return false, err
 	}
-	obsoleteFlag, err := settingFlag(obsolete)
+	obsoleteFlag, err := t.settingFlag(obsolete)
 	if err != nil {
 		return false, err
 	}
 	if obsoleteFlag {
 		return false, nil
 	}
-	return settingFlag(value)
+	return t.settingFlag(value)
 }
 
 func (t *Toolset) readAIFunctionValue(ctx context.Context) (bool, error) {
@@ -725,16 +729,19 @@ func (t *Toolset) readAIFunctionValue(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return settingFlag(value)
+	return t.settingFlag(value)
 }
 
-func settingFlag(text string) (bool, error) {
+func (t *Toolset) settingFlag(text string) (bool, error) {
 	switch strings.ToLower(text) {
 	case "1", "true":
 		return true, nil
 	case "0", "false":
 		return false, nil
 	default:
+		if t.policy.Enabled() {
+			return false, errors.New(settingFailedMessage)
+		}
 		return false, fmt.Errorf("unrecognized AI function setting %q", text)
 	}
 }

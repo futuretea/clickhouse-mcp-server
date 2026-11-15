@@ -2,11 +2,22 @@ package clickhouse
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"reflect"
 	"sort"
 	"strings"
+
+	"github.com/futuretea/clickhouse-mcp-server/pkg/core/masking"
+)
+
+const (
+	maskingFailedMessage = "[clickhouse_masking_failed] result was not returned"
+	queryFailedMessage   = "[clickhouse_query_failed] result was not returned"
+	startupFailedMessage = "[clickhouse_startup_failed] ClickHouse startup check failed"
+	settingFailedMessage = "[clickhouse_setting_failed] result was not returned"
 )
 
 type queryResult struct {
@@ -16,13 +27,14 @@ type queryResult struct {
 	Truncated bool     `json:"truncated"`
 }
 
-func (t *Toolset) readRows(ctx context.Context, operation, query string, parameters map[string]string, maxRows int) (queryResult, error) {
+func (t *Toolset) readRows(ctx context.Context, operation, query string, parameters map[string]string, maxRows int) (queryResult, *presenter, error) {
 	rows, err := t.client.Query(ctx, query, parameters)
 	if err != nil {
-		return queryResult{}, t.queryError(operation, err)
+		return queryResult{}, nil, t.queryError(operation, err)
 	}
 	defer func() { _ = rows.Close() }()
 
+	presented := t.beginResult()
 	result := queryResult{Columns: rows.Columns(), Rows: make([][]any, 0)}
 	scanTypes := rows.ScanTypes()
 	for rows.Next() {
@@ -32,18 +44,22 @@ func (t *Toolset) readRows(ctx context.Context, operation, query string, paramet
 		}
 		values, destinations := scanDestinations(len(result.Columns), scanTypes)
 		if err := rows.Scan(destinations...); err != nil {
-			return queryResult{}, t.queryError(operation, err)
+			return queryResult{}, nil, t.queryError(operation, err)
 		}
 		for i, destination := range destinations {
 			values[i] = scannedValue(destination)
 		}
-		result.Rows = append(result.Rows, displayRow(values))
+		row, err := presented.row(result.Columns, values)
+		if err != nil {
+			return queryResult{}, nil, t.maskFailure()
+		}
+		result.Rows = append(result.Rows, row)
 	}
 	if err := rows.Err(); err != nil {
-		return queryResult{}, t.queryError(operation, err)
+		return queryResult{}, nil, t.queryError(operation, err)
 	}
 	result.RowCount = len(result.Rows)
-	return result, nil
+	return result, presented, nil
 }
 
 func scanDestinations(columnCount int, scanTypes []reflect.Type) ([]any, []any) {
@@ -71,8 +87,30 @@ func scannedValue(destination any) any {
 }
 
 func (t *Toolset) queryError(operation string, err error) error {
+	if t.policy.Enabled() {
+		return errors.New(queryFailedMessage)
+	}
 	message := redactSecret(err.Error(), t.password)
 	return fmt.Errorf("ClickHouse %s failed at %s (database %q): %s; check clickhouse.address, clickhouse.secure, clickhouse.database, and the SQL", operation, t.address, t.database, message)
+}
+
+func (t *Toolset) maskFailure() error {
+	return errors.New(maskingFailedMessage)
+}
+
+func (t *Toolset) emit(value any) (string, error) {
+	return emitValue(t.policy, value)
+}
+
+func emitValue(policy masking.Policy, value any) (string, error) {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		if policy.Enabled() {
+			return "", errors.New(maskingFailedMessage)
+		}
+		return "", fmt.Errorf("encode ClickHouse result: %w", err)
+	}
+	return string(encoded), nil
 }
 
 func redactSecret(message, password string) string {
@@ -108,6 +146,14 @@ func displayRow(values []any) []any {
 		row[i] = fmt.Sprint(value)
 	}
 	return row
+}
+
+func (t *Toolset) identifierCell(row []any, index int) string {
+	value := cellString(row, index)
+	if t.policy.MatchName(value) {
+		return t.policy.Placeholder()
+	}
+	return value
 }
 
 func cellString(row []any, index int) string {

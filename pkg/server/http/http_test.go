@@ -15,6 +15,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/futuretea/clickhouse-mcp-server/pkg/core/config"
+	"github.com/futuretea/clickhouse-mcp-server/pkg/core/masking"
 	internalhttp "github.com/futuretea/clickhouse-mcp-server/pkg/server/http"
 	mcpserver "github.com/futuretea/clickhouse-mcp-server/pkg/server/mcp"
 	"github.com/futuretea/clickhouse-mcp-server/pkg/toolset"
@@ -124,7 +125,7 @@ func TestRequestMiddlewareLogsPathWithoutQueryString(t *testing.T) {
 	var logs bytes.Buffer
 	handler := internalhttp.RequestMiddlewareWithLogger(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
-	}), zerolog.New(&logs).Level(zerolog.DebugLevel))
+	}), zerolog.New(&logs).Level(zerolog.DebugLevel), masking.Disabled())
 
 	request := httptest.NewRequest(http.MethodGet, "http://example.test/mcp?access_token=must-not-appear", nil)
 	handler.ServeHTTP(httptest.NewRecorder(), request)
@@ -135,6 +136,25 @@ func TestRequestMiddlewareLogsPathWithoutQueryString(t *testing.T) {
 	}
 	if strings.Contains(output, "?") || strings.Contains(output, "must-not-appear") {
 		t.Fatalf("log output leaked a query string: %q", output)
+	}
+}
+
+func TestRequestMiddlewareUsesRouteClassWhenMaskingIsEnabled(t *testing.T) {
+	policy, err := masking.ParseJSON(`{"enabled":true,"values":["synthetic-token-value"]}`)
+	if err != nil {
+		t.Fatalf("ParseJSON: %v", err)
+	}
+	var logs bytes.Buffer
+	handler := internalhttp.RequestMiddlewareWithLogger(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}), zerolog.New(&logs).Level(zerolog.DebugLevel), policy)
+
+	request := httptest.NewRequest(http.MethodGet, "http://example.test/mcp/synthetic-token-value?access_token=synthetic-token-value", nil)
+	handler.ServeHTTP(httptest.NewRecorder(), request)
+
+	output := logs.String()
+	if !strings.Contains(output, `"route":"other"`) || strings.Contains(output, "synthetic-token-value") || strings.Contains(output, "/mcp") || strings.Contains(output, "?") {
+		t.Fatalf("log output = %q", output)
 	}
 }
 

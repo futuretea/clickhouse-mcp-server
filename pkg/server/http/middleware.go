@@ -10,15 +10,18 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+
+	"github.com/futuretea/clickhouse-mcp-server/pkg/core/masking"
 )
 
 // RequestMiddleware logs HTTP requests without query strings.
-func RequestMiddleware(next http.Handler) http.Handler {
-	return RequestMiddlewareWithLogger(next, log.Logger)
+// Active masking records a route class instead of the request path.
+func RequestMiddleware(next http.Handler, policy masking.Policy) http.Handler {
+	return RequestMiddlewareWithLogger(next, log.Logger, policy)
 }
 
 // RequestMiddlewareWithLogger logs HTTP requests using the provided logger.
-func RequestMiddlewareWithLogger(next http.Handler, logger zerolog.Logger) http.Handler {
+func RequestMiddlewareWithLogger(next http.Handler, logger zerolog.Logger, policy masking.Policy) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == HealthEndpoint {
 			next.ServeHTTP(w, r)
@@ -33,13 +36,31 @@ func RequestMiddlewareWithLogger(next http.Handler, logger zerolog.Logger) http.
 
 		next.ServeHTTP(lrw, r)
 
-		logger.Debug().
-			Str("method", r.Method).
-			Str("path", r.URL.Path).
-			Int("status", lrw.statusCode).
+		event := logger.Debug().Str("method", r.Method)
+		if policy.Enabled() {
+			event = event.Str("route", routeClass(r.URL.Path))
+		} else {
+			event = event.Str("path", r.URL.Path)
+		}
+		event.Int("status", lrw.statusCode).
 			Dur("duration", time.Since(start)).
 			Msg("handled HTTP request")
 	})
+}
+
+func routeClass(path string) string {
+	switch path {
+	case HealthEndpoint:
+		return "healthz"
+	case MCPEndpoint:
+		return "mcp"
+	case SSEEndpoint:
+		return "sse"
+	case SSEMessageEndpoint:
+		return "message"
+	default:
+		return "other"
+	}
 }
 
 type loggingResponseWriter struct {
