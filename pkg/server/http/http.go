@@ -68,7 +68,7 @@ func ServeListener(ctx context.Context, mcpServer *mcpserver.Server, staticConfi
 		IdleTimeout:       defaultIdleTimeout,
 	}
 	handler := NewHandler(mcpServer, httpServer, staticConfig.SSEBaseURL)
-	httpServer.Handler = RequestMiddleware(handler)
+	httpServer.Handler = RequestMiddleware(handler, staticConfig.Masking)
 	return runServer(ctx, httpServer, handler, listener)
 }
 

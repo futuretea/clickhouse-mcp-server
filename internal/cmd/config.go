@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -15,6 +16,12 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/futuretea/clickhouse-mcp-server/pkg/core/config"
+	"github.com/futuretea/clickhouse-mcp-server/pkg/core/masking"
+)
+
+const (
+	maskingFailedMessage = "[clickhouse_masking_failed] result was not returned"
+	connectFailedMessage = "[clickhouse_connect_failed] result was not returned"
 )
 
 type clickHouseProbe interface {
@@ -54,11 +61,15 @@ func newConfigCheckCommand(streams IOStreams, cfgFile *string, v *viper.Viper) *
 			if err != nil {
 				return safeConfigLoadError(err)
 			}
-
-			if err := writeConfigCheck(cmd.OutOrStdout(), configCheckFields(cmd, v, cfg)); err != nil {
+			budget := &masking.Budget{}
+			fields, err := configCheckFields(cmd, v, cfg, budget)
+			if err != nil {
 				return err
 			}
-			if err := writeConfigPath(cmd.OutOrStdout(), cmd.Root(), *cfgFile, cfg.ClickHouse); err != nil {
+			if err := writeConfigCheck(cmd.OutOrStdout(), fields); err != nil {
+				return err
+			}
+			if err := writeConfigPath(cmd.OutOrStdout(), cmd.Root(), *cfgFile, cfg, budget); err != nil {
 				return err
 			}
 			connect, err := cmd.Flags().GetBool("connect")
@@ -68,7 +79,7 @@ func newConfigCheckCommand(streams IOStreams, cfgFile *string, v *viper.Viper) *
 			if !connect {
 				return nil
 			}
-			if err := verifyClickHouse(cmd.Context(), cfg.ClickHouse); err != nil {
+			if err := verifyClickHouse(cmd.Context(), cfg); err != nil {
 				return err
 			}
 			_, err = fmt.Fprintln(cmd.OutOrStdout(), "ClickHouse connection verified.")
@@ -79,7 +90,7 @@ func newConfigCheckCommand(streams IOStreams, cfgFile *string, v *viper.Viper) *
 	return command
 }
 
-func configCheckFields(cmd *cobra.Command, v *viper.Viper, cfg *config.StaticConfig) []checkField {
+func configCheckFields(cmd *cobra.Command, v *viper.Viper, cfg *config.StaticConfig, budget *masking.Budget) ([]checkField, error) {
 	fields := []checkField{
 		{name: "clickhouse.address", value: cfg.ClickHouse.Address, source: configValueSource(cmd, v, "clickhouse.address", "MCP_CLICKHOUSE_ADDRESS", "")},
 		{name: "clickhouse.database", value: cfg.ClickHouse.Database, source: configValueSource(cmd, v, "clickhouse.database", "MCP_CLICKHOUSE_DATABASE", cfg.ClickHouse.Database)},
@@ -95,14 +106,40 @@ func configCheckFields(cmd *cobra.Command, v *viper.Viper, cfg *config.StaticCon
 		{name: "enabled_domains", value: strings.Join(cfg.EnabledDomains, ","), source: configValueSource(cmd, v, "enabled_domains", "MCP_ENABLED_DOMAINS", "")},
 		{name: "disabled_domains", value: strings.Join(cfg.DisabledDomains, ","), source: configValueSource(cmd, v, "disabled_domains", "MCP_DISABLED_DOMAINS", "")},
 		{name: "allow_unsafe_database_role", value: strconv.FormatBool(cfg.AllowUnsafeDatabaseRole), source: configValueSource(cmd, v, "allow_unsafe_database_role", "MCP_ALLOW_UNSAFE_DATABASE_ROLE", "")},
+		{name: "masking", value: maskingStatus(cfg.Masking), source: maskingSource(v)},
 	}
 	for index := range fields {
-		if fields[index].name == "clickhouse.password_status" {
+		if fields[index].name == "clickhouse.password_status" || fields[index].name == "masking" {
 			continue
 		}
 		fields[index].value = redactPasswordForms(fields[index].value, cfg.ClickHouse.Username, cfg.ClickHouse.Password)
+		if !cfg.Masking.Enabled() {
+			continue
+		}
+		masked, err := cfg.Masking.MaskText(fields[index].value, budget)
+		if err != nil {
+			return nil, errors.New(maskingFailedMessage)
+		}
+		fields[index].value = masked
 	}
-	return fields
+	return fields, nil
+}
+
+func maskingStatus(policy masking.Policy) string {
+	if policy.Enabled() {
+		return "enabled"
+	}
+	return "disabled"
+}
+
+func maskingSource(v *viper.Viper) string {
+	if _, ok := os.LookupEnv("MCP_MASKING_JSON"); ok {
+		return "environment"
+	}
+	if v != nil && v.InConfig("masking") {
+		return "YAML"
+	}
+	return "default"
 }
 
 func configValueSource(cmd *cobra.Command, v *viper.Viper, key, environmentKey, value string) string {
@@ -161,7 +198,7 @@ func writeConfigCheck(output interface{ Write([]byte) (int, error) }, fields []c
 	return nil
 }
 
-func writeConfigPath(output interface{ Write([]byte) (int, error) }, root *cobra.Command, cfgFile string, clickHouse config.ClickHouseConfig) error {
+func writeConfigPath(output interface{ Write([]byte) (int, error) }, root *cobra.Command, cfgFile string, cfg *config.StaticConfig, budget *masking.Budget) error {
 	source := "default"
 	if root.PersistentFlags().Changed("config") {
 		source = "flag"
@@ -169,13 +206,23 @@ func writeConfigPath(output interface{ Write([]byte) (int, error) }, root *cobra
 	if cfgFile == "" {
 		cfgFile = "(not set)"
 	}
-	cfgFile = redactPasswordForms(cfgFile, clickHouse.Username, clickHouse.Password)
+	cfgFile = redactPasswordForms(cfgFile, cfg.ClickHouse.Username, cfg.ClickHouse.Password)
+	if cfg.Masking.Enabled() {
+		masked, err := cfg.Masking.MaskText(cfgFile, budget)
+		if err != nil {
+			return errors.New(maskingFailedMessage)
+		}
+		cfgFile = masked
+	}
 	_, err := fmt.Fprintf(output, "config=%s source=%s\n", cfgFile, source)
 	return err
 }
 
 func safeConfigLoadError(err error) error {
 	message := err.Error()
+	if message == "load config: "+masking.InvalidConfigMessage || message == masking.InvalidConfigMessage {
+		return errors.New(masking.InvalidConfigMessage)
+	}
 	if strings.HasPrefix(message, "load config: clickhouse.address is required;") {
 		return fmt.Errorf("clickhouse.address is required; set a host:port such as 127.0.0.1:8123")
 	}
@@ -185,8 +232,8 @@ func safeConfigLoadError(err error) error {
 	return fmt.Errorf("load config: configuration is invalid")
 }
 
-func verifyClickHouse(ctx context.Context, cfg config.ClickHouseConfig) error {
-	probe, err := openClickHouseProbe(clickHouseProbeOptions(cfg))
+func verifyClickHouse(ctx context.Context, cfg *config.StaticConfig) error {
+	probe, err := openClickHouseProbe(clickHouseProbeOptions(cfg.ClickHouse))
 	if err != nil {
 		return redactedConnectionError("open", err, cfg)
 	}
@@ -218,8 +265,11 @@ func clickHouseProbeOptions(cfg config.ClickHouseConfig) *ch.Options {
 	return options
 }
 
-func redactedConnectionError(stage string, err error, cfg config.ClickHouseConfig) error {
-	return fmt.Errorf("ClickHouse %s failed: %s", stage, redactPasswordForms(err.Error(), cfg.Username, cfg.Password))
+func redactedConnectionError(stage string, err error, cfg *config.StaticConfig) error {
+	if cfg.Masking.Enabled() {
+		return errors.New(connectFailedMessage)
+	}
+	return fmt.Errorf("ClickHouse %s failed: %s", stage, redactPasswordForms(err.Error(), cfg.ClickHouse.Username, cfg.ClickHouse.Password))
 }
 
 func redactPasswordForms(message, username, password string) string {

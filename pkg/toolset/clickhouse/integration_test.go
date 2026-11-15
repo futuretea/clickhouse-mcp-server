@@ -18,7 +18,7 @@ func TestIntegrationReadOnlyClickHouse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load integration configuration: %v", err)
 	}
-	toolset, err := NewToolset(t.Context(), cfg.ClickHouse, cfg.AllowUnsafeDatabaseRole)
+	toolset, err := NewToolset(t.Context(), cfg.ClickHouse, cfg.AllowUnsafeDatabaseRole, cfg.Masking)
 	if err != nil {
 		t.Fatalf("create ClickHouse toolset: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestIntegrationWildcardProcessGrantRejected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load integration configuration: %v", err)
 	}
-	toolset, err := NewToolset(t.Context(), cfg.ClickHouse, cfg.AllowUnsafeDatabaseRole)
+	toolset, err := NewToolset(t.Context(), cfg.ClickHouse, cfg.AllowUnsafeDatabaseRole, cfg.Masking)
 	if toolset != nil {
 		t.Fatal("NewToolset returned a toolset for a prefix wildcard on system.processes")
 	}
@@ -123,7 +123,7 @@ func TestIntegrationAIFunctionPrivilegeRejected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load integration configuration: %v", err)
 	}
-	toolset, err := NewToolset(t.Context(), cfg.ClickHouse, cfg.AllowUnsafeDatabaseRole)
+	toolset, err := NewToolset(t.Context(), cfg.ClickHouse, cfg.AllowUnsafeDatabaseRole, cfg.Masking)
 	if toolset != nil {
 		t.Fatal("NewToolset returned a toolset for an AI function privilege")
 	}

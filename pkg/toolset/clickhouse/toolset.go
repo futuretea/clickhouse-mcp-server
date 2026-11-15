@@ -2,7 +2,6 @@ package clickhouse
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math"
 	"strings"
@@ -10,6 +9,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/futuretea/clickhouse-mcp-server/pkg/core/config"
+	"github.com/futuretea/clickhouse-mcp-server/pkg/core/masking"
 	"github.com/futuretea/clickhouse-mcp-server/pkg/toolset"
 )
 
@@ -26,13 +26,20 @@ type Toolset struct {
 	database string
 	password string
 	client   QueryClient
+	policy   masking.Policy
 }
 
 // NewToolset connects to ClickHouse and rejects dangerous service accounts
 // before any tool can run a query. allowUnsafeDatabaseRole skips only that
 // privilege rejection; connection and grant-probe failures still abort.
-func NewToolset(ctx context.Context, cfg config.ClickHouseConfig, allowUnsafeDatabaseRole bool) (*Toolset, error) {
-	return newToolset(ctx, cfg, allowUnsafeDatabaseRole, openQueryClient)
+func NewToolset(ctx context.Context, cfg config.ClickHouseConfig, allowUnsafeDatabaseRole bool, policy masking.Policy) (*Toolset, error) {
+	return newToolset(ctx, cfg, allowUnsafeDatabaseRole, policy, openQueryClient)
+}
+
+// NewToolsetWithClient binds an already open client. It does not connect and
+// it does not run the startup privilege check.
+func NewToolsetWithClient(address, database, password string, client QueryClient, policy masking.Policy) *Toolset {
+	return newToolsetWithClient(address, database, password, client, policy)
 }
 
 // NewCatalogToolset returns tool definitions without connecting to ClickHouse.
@@ -42,15 +49,15 @@ func NewCatalogToolset(cfg config.ClickHouseConfig) *Toolset {
 	if strings.TrimSpace(cfg.Database) == "" {
 		cfg.Database = "default"
 	}
-	return newToolsetWithClient(cfg.Address, cfg.Database, cfg.Password, unavailableClient{})
+	return newToolsetWithClient(cfg.Address, cfg.Database, cfg.Password, unavailableClient{}, masking.Disabled())
 }
 
 func openQueryClient(cfg config.ClickHouseConfig) (QueryClient, error) {
 	return newDriverClient(cfg)
 }
 
-func newToolsetWithClient(address, database, password string, client QueryClient) *Toolset {
-	return &Toolset{address: address, database: database, password: password, client: client}
+func newToolsetWithClient(address, database, password string, client QueryClient, policy masking.Policy) *Toolset {
+	return &Toolset{address: address, database: database, password: password, client: client, policy: policy}
 }
 
 // Close releases the underlying ClickHouse connection pool when present.
@@ -122,15 +129,15 @@ func (t *Toolset) GetTools() []toolset.ServerTool {
 }
 
 func (t *Toolset) listDatabases(ctx context.Context, _ map[string]any) (string, error) {
-	result, err := t.readRows(ctx, "list databases", "SELECT name FROM system.databases ORDER BY name", nil, -1)
+	result, _, err := t.readRows(ctx, "list databases", "SELECT name FROM system.databases ORDER BY name", nil, -1)
 	if err != nil {
 		return "", err
 	}
 	databases := make([]string, 0, len(result.Rows))
 	for _, row := range result.Rows {
-		databases = append(databases, cellString(row, 0))
+		databases = append(databases, t.identifierCell(row, 0))
 	}
-	return marshalResult(struct {
+	return t.emit(struct {
 		Databases []string `json:"databases"`
 	}{Databases: databases})
 }
@@ -140,15 +147,19 @@ func (t *Toolset) listTables(ctx context.Context, params map[string]any) (string
 	if err != nil {
 		return "", err
 	}
-	result, err := t.readRows(ctx, "list tables", "SELECT name, engine, comment FROM system.tables WHERE database = {database:String} ORDER BY name", map[string]string{"database": database}, -1)
+	result, presented, err := t.readRows(ctx, "list tables", "SELECT name, engine, comment FROM system.tables WHERE database = {database:String} ORDER BY name", map[string]string{"database": database}, -1)
 	if err != nil {
 		return "", err
 	}
+	database, err = presented.maskIdentifier(database)
+	if err != nil {
+		return "", t.maskFailure()
+	}
 	tables := make([]table, 0, len(result.Rows))
 	for _, row := range result.Rows {
-		tables = append(tables, table{Name: cellString(row, 0), Engine: cellString(row, 1), Comment: cellString(row, 2)})
+		tables = append(tables, table{Name: t.identifierCell(row, 0), Engine: cellString(row, 1), Comment: cellString(row, 2)})
 	}
-	return marshalResult(struct {
+	return t.emit(struct {
 		Database string  `json:"database"`
 		Tables   []table `json:"tables"`
 	}{Database: database, Tables: tables})
@@ -163,21 +174,29 @@ func (t *Toolset) describeTable(ctx context.Context, params map[string]any) (str
 	if err != nil {
 		return "", err
 	}
-	result, err := t.readRows(ctx, "describe table", "SELECT name, type, default_kind, default_expression, comment FROM system.columns WHERE database = {database:String} AND table = {table:String} ORDER BY position", map[string]string{"database": database, "table": tableName}, -1)
+	result, presented, err := t.readRows(ctx, "describe table", "SELECT name, type, default_kind, default_expression, comment FROM system.columns WHERE database = {database:String} AND table = {table:String} ORDER BY position", map[string]string{"database": database, "table": tableName}, -1)
 	if err != nil {
 		return "", err
+	}
+	database, err = presented.maskIdentifier(database)
+	if err != nil {
+		return "", t.maskFailure()
+	}
+	tableName, err = presented.maskIdentifier(tableName)
+	if err != nil {
+		return "", t.maskFailure()
 	}
 	columns := make([]column, 0, len(result.Rows))
 	for _, row := range result.Rows {
 		columns = append(columns, column{
-			Name:              cellString(row, 0),
+			Name:              t.identifierCell(row, 0),
 			Type:              cellString(row, 1),
 			DefaultKind:       cellString(row, 2),
 			DefaultExpression: cellString(row, 3),
 			Comment:           cellString(row, 4),
 		})
 	}
-	return marshalResult(struct {
+	return t.emit(struct {
 		Database string   `json:"database"`
 		Table    string   `json:"table"`
 		Columns  []column `json:"columns"`
@@ -196,11 +215,15 @@ func (t *Toolset) query(ctx context.Context, params map[string]any) (string, err
 	if err != nil {
 		return "", err
 	}
-	result, err := t.readRows(ctx, "run query", statement, nil, maxRows)
+	result, presented, err := t.readRows(ctx, "run query", statement, nil, maxRows)
 	if err != nil {
 		return "", err
 	}
-	return marshalResult(result)
+	result.Columns, err = presented.maskIdentifiers(result.Columns)
+	if err != nil {
+		return "", t.maskFailure()
+	}
+	return t.emit(result)
 }
 
 func (t *Toolset) optionalString(params map[string]any, key string) (string, error) {
@@ -251,14 +274,6 @@ func parseMaxRows(value any) (int, error) {
 
 func maxInt() int {
 	return int(^uint(0) >> 1)
-}
-
-func marshalResult(value any) (string, error) {
-	encoded, err := json.Marshal(value)
-	if err != nil {
-		return "", fmt.Errorf("encode ClickHouse result: %w", err)
-	}
-	return string(encoded), nil
 }
 
 type table struct {

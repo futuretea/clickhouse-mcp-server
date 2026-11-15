@@ -14,11 +14,12 @@ import (
 	ch "github.com/ClickHouse/clickhouse-go/v2"
 
 	"github.com/futuretea/clickhouse-mcp-server/pkg/core/config"
+	"github.com/futuretea/clickhouse-mcp-server/pkg/core/masking"
 	"github.com/futuretea/clickhouse-mcp-server/pkg/toolset"
 )
 
 func TestToolDefinitions(t *testing.T) {
-	tools := newToolsetWithClient("127.0.0.1:8123", "default", "", &fakeClient{}).GetTools()
+	tools := newToolsetWithClient("127.0.0.1:8123", "default", "", &fakeClient{}, masking.Disabled()).GetTools()
 	names := make([]string, 0, len(tools))
 	for _, tool := range tools {
 		names = append(names, tool.Tool.Name)
@@ -44,7 +45,7 @@ func TestDiscoveryToolsUseParameters(t *testing.T) {
 		{columns: []string{"name", "engine", "comment"}, rows: [][]any{{"events", "MergeTree", "event data"}}},
 		{columns: []string{"name", "type", "default_kind", "default_expression", "comment"}, rows: [][]any{{"id", "UInt64", "", "", "identifier"}}},
 	}}
-	toolset := newToolsetWithClient("127.0.0.1:8123", "default", "", client)
+	toolset := newToolsetWithClient("127.0.0.1:8123", "default", "", client, masking.Disabled())
 	handlers := handlersByName(toolset.GetTools())
 
 	got, err := handlers["clickhouse_list_databases"](t.Context(), nil)
@@ -94,7 +95,7 @@ func TestQueryFormatsRowsAndTruncates(t *testing.T) {
 		rows[i] = []any{i, nil}
 	}
 	client := &fakeClient{responses: []fakeResponse{{columns: []string{"number", "missing"}, rows: rows}}}
-	handler := handlersByName(newToolsetWithClient("127.0.0.1:8123", "default", "", client).GetTools())["clickhouse_query"]
+	handler := handlersByName(newToolsetWithClient("127.0.0.1:8123", "default", "", client, masking.Disabled()).GetTools())["clickhouse_query"]
 
 	encoded, err := handler(t.Context(), map[string]any{"query": "SELECT number, NULL FROM numbers(1001)"})
 	if err != nil {
@@ -118,7 +119,7 @@ func TestQueryFormatsRowsAndTruncates(t *testing.T) {
 
 func TestQueryCustomMaxRowsReadsExtraRow(t *testing.T) {
 	client := &fakeClient{responses: []fakeResponse{{columns: []string{"number"}, rows: [][]any{{1}, {2}, {3}}}}}
-	handler := handlersByName(newToolsetWithClient("127.0.0.1:8123", "default", "", client).GetTools())["clickhouse_query"]
+	handler := handlersByName(newToolsetWithClient("127.0.0.1:8123", "default", "", client, masking.Disabled()).GetTools())["clickhouse_query"]
 
 	encoded, err := handler(t.Context(), map[string]any{"query": "SELECT 1", "max_rows": float64(2)})
 	if err != nil {
@@ -138,7 +139,7 @@ func TestQueryCustomMaxRowsReadsExtraRow(t *testing.T) {
 
 func TestQueryRejectsUnsafeParameters(t *testing.T) {
 	client := &fakeClient{}
-	handler := handlersByName(newToolsetWithClient("127.0.0.1:8123", "default", "", client).GetTools())["clickhouse_query"]
+	handler := handlersByName(newToolsetWithClient("127.0.0.1:8123", "default", "", client, masking.Disabled()).GetTools())["clickhouse_query"]
 	tests := []struct {
 		name   string
 		params map[string]any
@@ -213,7 +214,7 @@ func TestQueryErrorsRedactPasswordForms(t *testing.T) {
 
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
-			handler := handlersByName(newToolsetWithClient("localhost:8123", "default", password, testCase.client).GetTools())["clickhouse_query"]
+			handler := handlersByName(newToolsetWithClient("localhost:8123", "default", password, testCase.client, masking.Disabled()).GetTools())["clickhouse_query"]
 			_, err := handler(t.Context(), map[string]any{"query": "SELECT 1"})
 			if err == nil || !strings.Contains(err.Error(), "[redacted]") {
 				t.Fatalf("error = %v", err)

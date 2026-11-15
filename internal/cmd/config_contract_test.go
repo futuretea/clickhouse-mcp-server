@@ -93,6 +93,7 @@ func TestConfigCheckEmitsTheConfirmedFieldsInOrder(t *testing.T) {
 		{"enabled_domains", "", "default"},
 		{"disabled_domains", "", "default"},
 		{"allow_unsafe_database_role", "false", "default"},
+		{"masking", "disabled", "default"},
 	}
 	var got []configCheckField
 	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {

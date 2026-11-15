@@ -1,13 +1,17 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 
 	"github.com/rs/zerolog"
 	"github.com/spf13/viper"
+
+	"github.com/futuretea/clickhouse-mcp-server/pkg/core/masking"
 )
 
 // StaticConfig contains configuration that is fixed when the server starts.
@@ -25,6 +29,9 @@ type StaticConfig struct {
 	// AllowUnsafeDatabaseRole skips only the startup service-account privilege
 	// rejection. Connection and grant-probe failures still abort startup.
 	AllowUnsafeDatabaseRole bool `mapstructure:"allow_unsafe_database_role"`
+
+	// Masking is parsed separately so MCP_MASKING_JSON replaces the whole object.
+	Masking masking.Policy `mapstructure:"-"`
 }
 
 // ClickHouseConfig contains the HTTP(S) connection settings for ClickHouse.
@@ -114,7 +121,7 @@ func LoadConfig(configPath string, v *viper.Viper) (*StaticConfig, error) {
 		v.SetConfigFile(configPath)
 		v.SetConfigType("yaml")
 		if err := v.ReadInConfig(); err != nil {
-			return nil, fmt.Errorf("read config file: %w", err)
+			return nil, errors.New("read config file: configuration is invalid")
 		}
 	}
 
@@ -124,7 +131,7 @@ func LoadConfig(configPath string, v *viper.Viper) (*StaticConfig, error) {
 
 	cfg := &StaticConfig{}
 	if err := v.Unmarshal(cfg); err != nil {
-		return nil, fmt.Errorf("unmarshal config: %w", err)
+		return nil, errors.New("unmarshal config: configuration is invalid")
 	}
 
 	cfg.Listen = strings.TrimSpace(cfg.Listen)
@@ -143,7 +150,22 @@ func LoadConfig(configPath string, v *viper.Viper) (*StaticConfig, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
+	policy, err := loadMaskingPolicy(v)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Masking = policy
 	return cfg, nil
+}
+
+func loadMaskingPolicy(v *viper.Viper) (masking.Policy, error) {
+	if raw, ok := os.LookupEnv("MCP_MASKING_JSON"); ok {
+		return masking.ParseJSON(raw)
+	}
+	if v == nil || !v.InConfig("masking") {
+		return masking.Disabled(), nil
+	}
+	return masking.ParseRaw(v.Get("masking"))
 }
 
 func normalizeStringSlice(values []string) []string {

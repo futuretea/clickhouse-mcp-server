@@ -12,6 +12,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/futuretea/clickhouse-mcp-server/pkg/core/config"
+	"github.com/futuretea/clickhouse-mcp-server/pkg/core/masking"
 )
 
 func TestNewToolsetRejectsDangerousPrivileges(t *testing.T) {
@@ -423,7 +424,7 @@ func TestNewToolsetOptOutDoesNotSkipOtherStartupFailures(t *testing.T) {
 
 	t.Run("open failure", func(t *testing.T) {
 		output.Reset()
-		_, err := newToolset(t.Context(), startupConfig(), true, func(config.ClickHouseConfig) (QueryClient, error) {
+		_, err := newToolset(t.Context(), startupConfig(), true, masking.Disabled(), func(config.ClickHouseConfig) (QueryClient, error) {
 			return nil, errors.New("open failed dsn-sentinel-password")
 		})
 		assertStartupFailure(t, err)
@@ -432,7 +433,7 @@ func TestNewToolsetOptOutDoesNotSkipOtherStartupFailures(t *testing.T) {
 
 	t.Run("invalid address does not connect", func(t *testing.T) {
 		called := false
-		_, err := newToolset(t.Context(), config.ClickHouseConfig{}, true, func(config.ClickHouseConfig) (QueryClient, error) {
+		_, err := newToolset(t.Context(), config.ClickHouseConfig{}, true, masking.Disabled(), func(config.ClickHouseConfig) (QueryClient, error) {
 			called = true
 			return nil, nil
 		})
@@ -483,7 +484,7 @@ func TestNewToolsetUsesRawGrantQueryWhenAvailable(t *testing.T) {
 	}})
 	responses = append(responses, fakeResponse{columns: []string{"is_obsolete", "value"}, rows: [][]any{{"0", "false"}}})
 	client := &rawAwareClient{fakeClient: &fakeClient{responses: responses}}
-	toolset, err := newToolset(t.Context(), startupConfig(), false, func(config.ClickHouseConfig) (QueryClient, error) {
+	toolset, err := newToolset(t.Context(), startupConfig(), false, masking.Disabled(), func(config.ClickHouseConfig) (QueryClient, error) {
 		return client, nil
 	})
 	if err != nil {
@@ -588,7 +589,7 @@ func TestNewCatalogToolsetDoesNotConnect(t *testing.T) {
 
 func openStartup(t *testing.T, client *startupClient, allowUnsafe bool) (*Toolset, error) {
 	t.Helper()
-	return newToolset(t.Context(), startupConfig(), allowUnsafe, func(config.ClickHouseConfig) (QueryClient, error) {
+	return newToolset(t.Context(), startupConfig(), allowUnsafe, masking.Disabled(), func(config.ClickHouseConfig) (QueryClient, error) {
 		return client, nil
 	})
 }

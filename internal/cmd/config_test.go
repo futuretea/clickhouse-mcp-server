@@ -128,6 +128,7 @@ func TestConfigCheckDisplaysDefaultsAndDatabaseFallbackSources(t *testing.T) {
 			{"enabled_domains", "", "default"},
 			{"disabled_domains", "", "default"},
 			{"allow_unsafe_database_role", "false", "default"},
+			{"masking", "disabled", "default"},
 		})
 		assertLineContains(t, out, "config", "source", "default")
 	})
@@ -520,6 +521,16 @@ func clearConfigEnvironment(t *testing.T) {
 	} {
 		t.Setenv(key, "")
 	}
+	previous, existed := os.LookupEnv("MCP_MASKING_JSON")
+	if err := os.Unsetenv("MCP_MASKING_JSON"); err != nil {
+		t.Fatalf("unset MCP_MASKING_JSON: %v", err)
+	}
+	t.Cleanup(func() {
+		if !existed {
+			return
+		}
+		_ = os.Setenv("MCP_MASKING_JSON", previous)
+	})
 }
 
 func setConfigCheckAddress(t *testing.T, address string) {
