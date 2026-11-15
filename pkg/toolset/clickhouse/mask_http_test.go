@@ -3,6 +3,7 @@ package clickhouse
 import (
 	"bytes"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,10 +16,11 @@ import (
 )
 
 func TestMCPToolsCallOmitsConfiguredValue(t *testing.T) {
-	policy := mustPolicy(t, `{"enabled":true,"values":["synthetic-token-value"]}`)
+	sensitiveIP := net.ParseIP("203.0.113.10").To4()
+	policy := mustPolicy(t, `{"enabled":true,"values":["synthetic-token-value","`+sensitiveIP.String()+`"]}`)
 	client := &fakeClient{responses: []fakeResponse{{
-		columns: []string{"label"},
-		rows:    [][]any{{sentinelValue}},
+		columns: []string{"label", "ip"},
+		rows:    [][]any{{sentinelValue, sensitiveIP}},
 	}}}
 	bound := newToolsetWithClient("127.0.0.1:8123", "default", "", client, policy)
 	server, err := mcpserver.NewServer(mcpserver.Configuration{
@@ -52,7 +54,7 @@ func TestMCPToolsCallOmitsConfiguredValue(t *testing.T) {
 		t.Fatalf("status=%d body=%s", response.StatusCode, body)
 	}
 	text := string(body)
-	if strings.Contains(text, sentinelValue) || !strings.Contains(text, "[masked]") {
+	if strings.Contains(text, sentinelValue) || strings.Contains(text, sensitiveIP.String()) || !strings.Contains(text, "[masked]") {
 		t.Fatalf("tools/call body = %s", text)
 	}
 	if client.calls[0].query != "SELECT label" {

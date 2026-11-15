@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"errors"
+	"net"
 	"reflect"
 	"strings"
 	"testing"
@@ -74,11 +75,12 @@ func TestToolsCallPrintsMaskedStdout(t *testing.T) {
 	clearConfigEnvironment(t)
 	setConfigCheckAddress(t, "127.0.0.1:8123")
 	const secret = "synthetic-token-value"
-	policy, err := masking.ParseJSON(`{"enabled":true,"values":["` + secret + `"]}`)
+	sensitiveIP := net.ParseIP("203.0.113.10").To4()
+	policy, err := masking.ParseJSON(`{"enabled":true,"values":["` + secret + `","` + sensitiveIP.String() + `"]}`)
 	if err != nil {
 		t.Fatalf("ParseJSON: %v", err)
 	}
-	client := &recordingQueryClient{columns: []string{"label", "note"}, rows: [][]any{{secret, "ordinary"}}}
+	client := &recordingQueryClient{columns: []string{"label", "note", "ip"}, rows: [][]any{{secret, "ordinary", sensitiveIP}}}
 	bound := clickhousetoolset.NewToolsetWithClient("127.0.0.1:8123", "default", "", client, policy)
 	previous := runtimeToolsetsOverride
 	runtimeToolsetsOverride = func(context.Context, *config.StaticConfig) ([]toolset.Toolset, error) {
@@ -90,7 +92,7 @@ func TestToolsCallPrintsMaskedStdout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tools call: %v stderr=%q", err, errOut)
 	}
-	if strings.Contains(out+errOut, secret) || !strings.Contains(out, "[masked]") || !strings.Contains(out, "ordinary") {
+	if strings.Contains(out+errOut, secret) || strings.Contains(out+errOut, sensitiveIP.String()) || !strings.Contains(out, "[masked]") || !strings.Contains(out, "ordinary") {
 		t.Fatalf("stdout=%q stderr=%q", out, errOut)
 	}
 	if client.query != "SELECT label" {

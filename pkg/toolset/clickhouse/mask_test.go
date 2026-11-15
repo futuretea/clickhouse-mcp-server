@@ -2,13 +2,19 @@ package clickhouse
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2/lib/chcol"
+	"github.com/google/uuid"
+	"github.com/paulmach/orb"
 	"github.com/shopspring/decimal"
 
 	"github.com/futuretea/clickhouse-mcp-server/pkg/core/masking"
@@ -230,6 +236,92 @@ func TestPresentDepthAndJSONVariant(t *testing.T) {
 	}
 }
 
+func TestTypedDisplaysNullOnValueMatchAndKeepLegacyMisses(t *testing.T) {
+	sensitiveIP := net.ParseIP("203.0.113.10").To4()
+	otherIP := net.ParseIP("192.0.2.1").To4()
+	sensitiveID := uuid.MustParse("11111111-2222-4333-8444-555555555555")
+	otherID := uuid.MustParse("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee")
+	sensitiveWhen := time.Date(2024, 5, 6, 7, 8, 9, 0, time.UTC)
+	otherWhen := time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC)
+	sensitivePoint := orb.Point{48.858844, 2.294351}
+	otherPoint := orb.Point{1, 2}
+	sensitiveRing := orb.Ring{sensitivePoint, orb.Point{2, 3}}
+	sensitiveDuration := 90 * time.Second
+	otherDuration := 2 * time.Second
+	policy := mustPolicy(t, `{"enabled":true,"names":["client_ip"],"values":["`+
+		fmt.Sprint(sensitiveIP)+`","`+sensitiveID.String()+`","`+fmt.Sprint(sensitiveWhen)+`","`+
+		fmt.Sprint(sensitivePoint)+`","`+fmt.Sprint(sensitiveRing)+`","`+fmt.Sprint(sensitiveDuration)+`","`+sentinelValue+`"]}`)
+
+	columns := []string{"ip", "id", "when", "where", "path", "elapsed", "addresses", "moments", "nested", "client_ip", "note", "plain"}
+	row := []any{
+		sensitiveIP,
+		sensitiveID,
+		sensitiveWhen,
+		sensitivePoint,
+		sensitiveRing,
+		sensitiveDuration,
+		[]net.IP{sensitiveIP, otherIP},
+		[]time.Time{sensitiveWhen, otherWhen},
+		map[any]any{"client": sensitiveIP, "label": sentinelValue, "when": sensitiveWhen, "keep": otherIP, sensitiveWhen: "ordinary"},
+		otherIP,
+		"seen " + sentinelValue,
+		"ordinary",
+	}
+	encoded := mustQuery(t, policy, columns, [][]any{row})
+	for _, secret := range []string{fmt.Sprint(sensitiveIP), sensitiveID.String(), fmt.Sprint(sensitiveWhen), fmt.Sprint(sensitivePoint), fmt.Sprint(sensitiveDuration), sentinelValue} {
+		if strings.Contains(encoded, secret) {
+			t.Fatalf("result still contains %q: %s", secret, encoded)
+		}
+	}
+	var result queryResult
+	if err := json.Unmarshal([]byte(encoded), &result); err != nil {
+		t.Fatalf("decode result: %v", err)
+	}
+	got := result.Rows[0]
+	if got[0] != nil || got[1] != nil || got[2] != nil || got[3] != nil || got[4] != nil || got[5] != nil || got[9] != nil {
+		t.Fatalf("matched scalars = %#v", got)
+	}
+	addresses, ok := got[6].([]any)
+	if !ok || len(addresses) != 2 || addresses[0] != nil || addresses[1] != fmt.Sprint(otherIP) {
+		t.Fatalf("addresses = %#v", got[6])
+	}
+	moments, ok := got[7].([]any)
+	if !ok || len(moments) != 2 || moments[0] != nil || moments[1] != fmt.Sprint(otherWhen) {
+		t.Fatalf("moments = %#v", got[7])
+	}
+	nested, ok := got[8].(map[string]any)
+	if !ok || nested["client"] != nil || nested["when"] != nil || nested["label"] != "[masked]" || nested["keep"] != fmt.Sprint(otherIP) || nested["[masked]"] != "ordinary" {
+		t.Fatalf("nested = %#v", got[8])
+	}
+	if got[10] != "seen [masked]" || got[11] != "ordinary" {
+		t.Fatalf("text cells = %#v %#v", got[10], got[11])
+	}
+
+	missColumns := []string{"ip", "id", "when", "where", "elapsed"}
+	missRow := []any{otherIP, otherID, otherWhen, otherPoint, otherDuration}
+	if got, want := mustQuery(t, policy, missColumns, [][]any{missRow}), mustQuery(t, masking.Disabled(), missColumns, [][]any{missRow}); got != want {
+		t.Fatalf("unmatched typed displays\nenabled %s\ndisabled %s", got, want)
+	}
+	if calls := mustQueryClient(t, policy, columns, [][]any{row}); calls[0].query != "SELECT typed" {
+		t.Fatalf("recorded query = %q", calls[0].query)
+	}
+}
+
+func TestBase64TextStaysOpaqueAndBytesAreScanned(t *testing.T) {
+	policy := mustPolicy(t, `{"enabled":true,"values":["`+sentinelValue+`"]}`)
+	opaque := base64.StdEncoding.EncodeToString([]byte(sentinelValue))
+	if strings.Contains(opaque, sentinelValue) {
+		t.Fatal("fixture base64 contains the plaintext token")
+	}
+	encoded := mustQuery(t, policy, []string{"text", "raw"}, [][]any{{
+		"prefix " + opaque + " suffix",
+		[]byte("xx " + sentinelValue + " yy"),
+	}})
+	if strings.Contains(encoded, sentinelValue) || !strings.Contains(encoded, opaque) || !strings.Contains(encoded, "xx [masked] yy") {
+		t.Fatalf("result = %s", encoded)
+	}
+}
+
 func TestNamePatternAnchorRejectsBreakoutAndEmitsWholeNames(t *testing.T) {
 	const secret = sentinelValue
 	raw := `{"enabled":true,"name_patterns":["a)|(b"],"values":["` + secret + `"]}`
@@ -356,6 +448,17 @@ func mustQueryError(t *testing.T, policy masking.Policy, columns []string, rows 
 	t.Helper()
 	_, err := mustQueryErrorOrResult(t, policy, columns, rows)
 	return err
+}
+
+func mustQueryClient(t *testing.T, policy masking.Policy, columns []string, rows [][]any) []queryCall {
+	t.Helper()
+	client := &fakeClient{responses: []fakeResponse{{columns: columns, rows: rows}}}
+	if _, err := handlersByName(newToolsetWithClient("127.0.0.1:8123", "default", "", client, policy).GetTools())["clickhouse_query"](
+		context.Background(), map[string]any{"query": "SELECT typed"},
+	); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	return client.calls
 }
 
 func mustQueryErrorOrResult(t *testing.T, policy masking.Policy, columns []string, rows [][]any) (string, error) {

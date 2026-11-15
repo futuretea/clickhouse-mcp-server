@@ -106,7 +106,7 @@ func (p *presenter) present(name string, value any, depth int) (any, bool, error
 
 func (p *presenter) scalarText(value any, rendered any) (any, bool, error) {
 	text, ok := rendered.(string)
-	if !ok || !numericOrBool(value) {
+	if !ok || !matchableScalar(value) {
 		return nil, false, nil
 	}
 	hit, err := p.policy.MatchScalar(text, p.budget)
@@ -119,9 +119,11 @@ func (p *presenter) scalarText(value any, rendered any) (any, bool, error) {
 	return nil, false, nil
 }
 
-func numericOrBool(value any) bool {
+func matchableScalar(value any) bool {
 	switch value.(type) {
-	case bool, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, uintptr, float32, float64, decimal.Decimal, big.Int:
+	case bool, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, uintptr, float32, float64, decimal.Decimal, big.Int,
+		time.Time, time.Duration, net.IP, uuid.UUID,
+		orb.Point, orb.Ring, orb.LineString, orb.Polygon, orb.MultiLineString, orb.MultiPolygon:
 		return true
 	default:
 		return false
