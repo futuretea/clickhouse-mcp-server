@@ -93,6 +93,35 @@ func TestLoadConfigInvalidYAMLDoesNotEchoDocument(t *testing.T) {
 	}
 }
 
+func TestLoadConfigRejectsUnanchoredNamePatternWithoutEcho(t *testing.T) {
+	unsetMaskingEnv(t)
+	const secret = "synthetic-token-value"
+	t.Setenv("MCP_MASKING_JSON", `{"enabled":true,"name_patterns":["a)|(b"],"values":["`+secret+`"]}`)
+	v := viper.New()
+	v.Set("clickhouse.address", "127.0.0.1:8123")
+	_, err := config.LoadConfig("", v)
+	if err == nil || err.Error() != masking.InvalidConfigMessage || strings.Contains(err.Error(), secret) || strings.Contains(err.Error(), "a)|(b") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestLoadConfigGroupedNamePatternMatchesWholeNames(t *testing.T) {
+	unsetMaskingEnv(t)
+	t.Setenv("MCP_MASKING_JSON", `{"enabled":true,"name_patterns":["(?:a)|(b)"]}`)
+	v := viper.New()
+	v.Set("clickhouse.address", "127.0.0.1:8123")
+	cfg, err := config.LoadConfig("", v)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if !cfg.Masking.MatchName("a") || !cfg.Masking.MatchName("b") {
+		t.Fatal("grouped name pattern missed a whole name")
+	}
+	if cfg.Masking.MatchName("aSECRET") || cfg.Masking.MatchName("zzb") || cfg.Masking.MatchName("ab") {
+		t.Fatal("grouped name pattern matched outside the whole name")
+	}
+}
+
 func TestLoadConfigDottedMaskingEnvDoesNotEnable(t *testing.T) {
 	unsetMaskingEnv(t)
 	t.Setenv("MCP_MASKING_ENABLED", "true")

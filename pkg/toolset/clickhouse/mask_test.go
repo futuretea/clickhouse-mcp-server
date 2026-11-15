@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -226,6 +227,33 @@ func TestPresentDepthAndJSONVariant(t *testing.T) {
 	}})
 	if strings.Contains(encoded, sentinelValue) || strings.Contains(encoded, sentinelName) || !strings.Contains(encoded, "ordinary") {
 		t.Fatalf("composite result = %s", encoded)
+	}
+}
+
+func TestNamePatternAnchorRejectsBreakoutAndEmitsWholeNames(t *testing.T) {
+	const secret = sentinelValue
+	raw := `{"enabled":true,"name_patterns":["a)|(b"],"values":["` + secret + `"]}`
+	_, err := masking.ParseJSON(raw)
+	if err == nil || err.Error() != masking.InvalidConfigMessage || strings.Contains(err.Error(), secret) || strings.Contains(err.Error(), "a)|(b") {
+		t.Fatalf("breakout error = %v", err)
+	}
+
+	policy := mustPolicy(t, `{"enabled":true,"name_patterns":["(?:a)|(b)"]}`)
+	encoded := mustQuery(t, policy, []string{"aSECRET", "b", "zzb", "ab"}, [][]any{{
+		"ordinary", secret, "tail", "ab-value",
+	}})
+	if strings.Contains(encoded, secret) || strings.Contains(encoded, `"b"`) {
+		t.Fatalf("whole-name result = %s", encoded)
+	}
+	var result queryResult
+	if err := json.Unmarshal([]byte(encoded), &result); err != nil {
+		t.Fatalf("decode result: %v", err)
+	}
+	if !reflect.DeepEqual(result.Columns, []string{"aSECRET", "[masked]", "zzb", "ab"}) {
+		t.Fatalf("columns = %#v", result.Columns)
+	}
+	if !reflect.DeepEqual(result.Rows[0], []any{"ordinary", "[masked]", "tail", "ab-value"}) {
+		t.Fatalf("row = %#v", result.Rows[0])
 	}
 }
 
