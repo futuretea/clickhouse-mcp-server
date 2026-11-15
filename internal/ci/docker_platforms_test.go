@@ -9,6 +9,48 @@ import (
 	"testing"
 )
 
+func TestDockerPlatformStepRejectsInvalidOutput(t *testing.T) {
+	root := repoRoot(t)
+	script := dockerPlatformsRun(t, root)
+	cases := []struct {
+		name    string
+		json    string
+		missing bool
+		noJQ    bool
+	}{
+		{name: "empty list", json: "{\n  \"docker\": []\n}\n"},
+		{name: "null list", json: "{\n  \"docker\": null\n}\n"},
+		{name: "invalid json", json: "{\n"},
+		{name: "missing file", missing: true},
+		{name: "jq missing", json: "{\n  \"docker\": [\"linux/amd64\", \"linux/arm64\"]\n}\n", noJQ: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if !tc.missing {
+				path := filepath.Join(dir, ".github", "ci", "release-platforms.json")
+				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(tc.json), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var env []string
+			if tc.noJQ {
+				env = []string{"PATH=" + t.TempDir()}
+			}
+			output, stderr, err := runBashStep(t, script, dir, env)
+			if err == nil {
+				t.Fatalf("platforms step succeeded with output %q\nstderr:\n%s", output, stderr)
+			}
+			if strings.Contains(output, "platforms=linux/amd64\n") || output == "platforms=linux/amd64\n" {
+				t.Fatalf("invalid platforms fell back to one architecture: %q", output)
+			}
+		})
+	}
+}
+
 func TestDockerPlatformStepEmitsBothArchitectures(t *testing.T) {
 	root := repoRoot(t)
 	script := dockerPlatformsRun(t, root)

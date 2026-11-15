@@ -23,7 +23,14 @@ jobs:
         with:
           persist-credentials: false
       - id: platforms
-        run: echo "platforms=$(jq -cr '.docker | join(",")' .github/ci/release-platforms.json)" >> "$GITHUB_OUTPUT"
+        run: |
+          set -euo pipefail
+          platforms="$(jq -er '.docker | join(",")' .github/ci/release-platforms.json)"
+          if [[ -z "$platforms" || "$platforms" == "null" ]]; then
+            echo "docker platforms output is empty" >&2
+            exit 1
+          fi
+          echo "platforms=${platforms}" >> "$GITHUB_OUTPUT"
 
   validate-tag:
     name: Validate release tag
