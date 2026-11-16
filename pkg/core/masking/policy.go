@@ -31,8 +31,7 @@ type Budget struct {
 	bytes int
 }
 
-// WithinInput reports whether n bytes may be decoded or scanned.
-// Callers check an encoded base64 cell before DecodeString allocates it.
+// WithinInput reports whether n is from 0 through 1 MiB (1,048,576 bytes).
 func WithinInput(n int) bool {
 	return n >= 0 && n <= maxInputBytes
 }
@@ -95,7 +94,8 @@ func (p Policy) MatchName(name string) bool {
 	return false
 }
 
-// ParseJSON parses MYSQL_MCP_MASKING_JSON. A present empty value is invalid.
+// ParseJSON parses one masking JSON document. config.LoadConfig calls it with
+// MCP_MASKING_JSON when that variable is present. A present empty value is invalid.
 func ParseJSON(raw string) (Policy, error) {
 	if strings.TrimSpace(raw) == "" {
 		return Policy{}, invalidConfig()
