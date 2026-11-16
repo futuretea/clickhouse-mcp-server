@@ -1,4 +1,6 @@
+# port 0 starts stdio. A non-zero port starts HTTP. HTTP does not authenticate clients.
 port: 0
+# Bind host for HTTP. 127.0.0.1 is loopback. Inside a published container, use 0.0.0.0.
 listen: 127.0.0.1
 sse_base_url: ""
 log_level: info
@@ -7,12 +9,18 @@ disabled_tools: []
 enabled_domains: []
 disabled_domains: []
 clickhouse:
+  # host:port only. No scheme, path, query, or userinfo. [::1]:8123 is valid.
   address: 127.0.0.1:8123
   database: default
+  # true uses HTTPS to ClickHouse and requires TLS 1.2 or newer.
   secure: false
+  # Empty sends the ClickHouse user default, which startup rejects on a normal installation.
   username: ""
   password: ""
+# true skips only the startup privilege rejection. Queries still use readonly=1.
 allow_unsafe_database_role: false
+# Masking stays off while this block is commented. MCP_MASKING_JSON, when set,
+# replaces the whole object. enabled true with no rules is rejected.
 # masking:
 #   enabled: false
 #   placeholder: "[masked]"

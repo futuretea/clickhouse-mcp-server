@@ -1,29 +1,17 @@
-# Repository Instructions
+# Repository instructions
 
-## Scope
+This repository is the ClickHouse MCP server. User setup is in `README.md` and `README.zh.md`. Keep those two files aligned.
 
-Keep the template generic. Prefer existing Go, Makefile, Docker, and GitHub
-Actions conventions over project-specific tooling or release assumptions.
-
-## Initialization
-
-Run `./scripts/init-template.sh` before building a repository created from
-this template. It replaces the documented placeholder values and installs the
-build CI template. Pass `--with-release` only when the derived repository is
-ready to configure npm and Docker publication.
+`scripts/` and `templates/` are retained template assets. Do not add this repository's module path, npm scope, image name, or tokens to those files. `./scripts/init-template.sh` initializes a new repository created from the template. This repository is already initialized. Do not run that script as a build step.
 
 ## Conventions
 
 - Keep code, workflow identifiers, and comments in English.
-- Keep user-facing repository documentation in English and Chinese when both
-  editions already exist.
-- Do not add secrets, registry names, package scopes, or repository-specific
-  release settings to reusable CI assets.
-- Keep generated binaries, package names, and supported platforms in one
-  explicit inventory per consuming project.
+- When a user-facing document exists in English and Chinese, update both.
+- Keep generated binary names, npm package names, and supported platforms in `.github/ci/release-platforms.json`. The README states which packages and images are actually published.
 
 ## Verification
 
-Run the narrowest relevant checks before delivery. For Go and CI changes,
-start with `make ci`; validate changed GitHub Actions with `actionlint` when
-it is available. Do not commit or publish unless the user explicitly asks.
+For Go and workflow changes, run `make ci`. That target runs `lint`, `test`, and `build`. It does not run `go test -race` or `make test-integration`. The GitHub Actions build workflow runs the race tests and `make test-template-init`. When `actionlint` is installed, run it on a workflow you changed.
+
+Do not commit or publish unless the user asks.
