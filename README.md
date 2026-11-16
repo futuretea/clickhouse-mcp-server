@@ -27,8 +27,10 @@ npx -y @futuretea/clickhouse-mcp-server@0.2.1 version
 This does not print the version. The wrapper still starts `mcp`. With no ClickHouse address, the process exits 1 and prints:
 
 ```text
-clickhouse.address is required; set a host:port such as 127.0.0.1:8123
+load config: clickhouse.address is required; set a host:port such as 127.0.0.1:8123
 ```
+
+`mcp` and `tools call` print that same line. `config check` prints the sentence without the `load config:` prefix. `config check` rewrites several load errors. `mcp`, `tools`, and the wrapper do not.
 
 The wrapper tarball contains `bin/index.js`, `package.json`, `README.md`, and `LICENSE`. The binary is in a platform package. npm installs the package that matches your OS and CPU. `0.2.1` publishes these packages:
 
@@ -111,11 +113,13 @@ On the `v0.2.1` commit, the version line contains `version=v0.2.1` and `commit=7
 clickhouse.address is required; set a host:port such as 127.0.0.1:8123
 ```
 
-An address that is not `host:port`, including `http://127.0.0.1:8123`, is reported as:
+`mcp` and `tools` report a missing address as:
 
 ```text
-load config: clickhouse.address is invalid
+load config: clickhouse.address is required; set a host:port such as 127.0.0.1:8123
 ```
+
+`config check` reports `http://127.0.0.1:8123` as `load config: clickhouse.address is invalid`. `mcp` and `tools` report that same address as `load config: clickhouse.address must be host:port without a URL scheme`. A path or userinfo is `load config: clickhouse.address must be a host:port` from `mcp` and `tools`, and `load config: clickhouse.address is invalid` from `config check`. A port outside 1 to 65535 is `load config: clickhouse.address must use a port from 1 to 65535` from `mcp` and `tools`, and the same invalid-address line from `config check`.
 
 There is no `--address` flag and no connection URL field.
 
@@ -136,7 +140,7 @@ An empty `clickhouse.database` becomes `default`, and `config check` reports `so
 
 `secure: true` uses HTTPS to ClickHouse and requires TLS 1.2 or newer. It does not add TLS to the MCP HTTP port.
 
-`clickhouse.secure` and `allow_unsafe_database_role` are booleans. The environment value is a string, and Viper decodes that string with `strconv.ParseBool`. The accepted true strings are `1`, `t`, `T`, `true`, `TRUE`, and `True`. The accepted false strings are `0`, `f`, `F`, `false`, `FALSE`, and `False`. `config check` accepts `1`, `t`, `T`, `true`, `TRUE`, `True`, `0`, `f`, `F`, `false`, `FALSE`, and `False` for `MCP_CLICKHOUSE_SECURE`. It accepts `1` for `MCP_ALLOW_UNSAFE_DATABASE_ROLE`. `yes`, `on`, and a value with surrounding spaces are rejected. The process exits 1 and prints `load config: configuration is invalid`. An empty environment value is ignored. A YAML boolean `true` or `false` is accepted. A YAML value `yes` or `"yes"` is rejected with that same error.
+`clickhouse.secure` and `allow_unsafe_database_role` are booleans. The environment value is a string, and Viper decodes that string with `strconv.ParseBool`. The accepted true strings are `1`, `t`, `T`, `true`, `TRUE`, and `True`. The accepted false strings are `0`, `f`, `F`, `false`, `FALSE`, and `False`. `config check` accepts `1`, `t`, `T`, `true`, `TRUE`, `True`, `0`, `f`, `F`, `false`, `FALSE`, and `False` for `MCP_CLICKHOUSE_SECURE`. It accepts `1` for `MCP_ALLOW_UNSAFE_DATABASE_ROLE`. `yes`, `on`, and a value with surrounding spaces are rejected. `config check` exits 1 and prints `load config: configuration is invalid`. `mcp` and `tools` exit 1 and print `load config: unmarshal config: configuration is invalid`. An empty environment value is ignored. A YAML boolean `true` or `false` is accepted. A YAML value `yes` or `"yes"` is rejected. `config check` uses the generic configuration error. `mcp` uses the unmarshal error.
 
 The `0.2.1` driver sends the ClickHouse user `default` when `clickhouse.username` is empty. A normal installation grants that user `ALL ON *.*`, and startup rejects it. Set `clickhouse.username` to a `SELECT`-only user. See [Service account](#service-account).
 
@@ -274,7 +278,7 @@ A successful call returns one MCP text block. The text is JSON.
 
 Omitted `database` uses `clickhouse.database`. `max_rows` defaults to 1000, and the schema minimum is 1. A value that is not a positive integer returns `max_rows must be a positive integer`. The query tool reads one extra row to set `truncated`. That extra row is not returned. `truncated` is present when it is false. List and describe do not apply `max_rows`.
 
-While masking is off, a non-null cell is a string. A database NULL is JSON `null`. While masking is on, an unmatched cell keeps that display text. A matched nested map or slice becomes JSON. A name rule replaces a matched string with the placeholder and replaces other matched types with JSON `null`.
+`clickhouse_query` rows keep the driver display values. While masking is off, a non-null query cell is a string and a database NULL is JSON `null`. `clickhouse_list_databases`, `clickhouse_list_tables`, and `clickhouse_describe_table` return strings. A NULL name, engine, comment, type, default kind, or default expression becomes `""`. While masking is on, an unmatched query cell keeps that display text. A matched nested map or slice in a query row becomes JSON. A name rule replaces a matched string with the placeholder. In a query row, a matched non-string becomes JSON `null`. List and describe convert that null back to `""`.
 
 `tools list` prints the four tools and does not connect. This command exits 0 even when the address refuses connections:
 
@@ -356,7 +360,7 @@ masking=disabled source=default
 config=(not set) source=default
 ```
 
-Source labels are `flag`, `environment`, `YAML`, and `default`. The command does not open the network unless you pass `--connect`. `--connect` opens one HTTP or HTTPS connection, pings, and closes it. It does not run the privilege check. On success it prints `ClickHouse connection verified.` On failure it prints `ClickHouse ping failed:` and the driver text, with a configured password replaced by `[redacted]`.
+Source labels are `flag`, `environment`, `YAML`, and `default`. The command does not open the network unless you pass `--connect`. `--connect` opens one HTTP or HTTPS connection, pings, and closes it. It does not run the privilege check. On success it prints `ClickHouse connection verified.` On failure it prints `ClickHouse ping failed:` and the driver text. A refused connection with a password shows the password as `***` in the URL, such as `http://default:***@127.0.0.1:1`. The server also replaces any remaining copy of the raw password, its query-escaped form, its path-escaped form, and the userinfo form with `[redacted]`. In that refused-connection text the password is already `***`, so `[redacted]` is not in the line.
 
 ```bash
 ./bin/clickhouse-mcp-server config check --connect
@@ -404,7 +408,7 @@ An empty value, a second JSON value, an unknown field, or `enabled: true` with n
 
 Name patterns are parsed on their own and then anchored to the whole field name. `a)|(b` is rejected. `(?:a)|(b)` matches only the whole names `a` and `b`. Value literals and value patterns are substring matches, including a one-character literal. RE2 returns the leftmost-first match and does not look for a longer alternative. The placeholder is not searched again.
 
-A matched string becomes the placeholder. A matched number, boolean, or other non-string becomes JSON `null`. An original null stays null. A null in a result can be a database NULL or a redacted value, and the JSON type can change.
+A matched string becomes the placeholder. A matched number, boolean, or other non-string becomes null in the walk. An original null stays null. In a `clickhouse_query` row, that null stays JSON `null`, so it can be a database NULL or a redacted value, and the JSON type can change. List and describe store those fields as strings, so the null becomes `""`.
 
 The server applies field rules to scanned driver values before `fmt.Sprint`. Unmatched cells keep the previous display text. ClickHouse does not decode a base64 string before masking it. A value rule that hits the original display text of a number, bool, time, duration, IP address, UUID, or geo value nulls the whole value. An unmatched value keeps that `fmt.Sprint` text. A JSON number keeps the digits from the document, including trailing zeros. A JSON value is counted again as its container, so it can exhaust the shared budget before a plain string of the same size. ClickHouse JSON and Variant values are walked. Two column names that mask to the same string fail the result.
 
@@ -414,7 +418,7 @@ While masking is on, the cap applies to the masking walk. One input string longe
 
 Masking does not find every private value. Compressed payloads and encodings the server does not recognize are not rewritten in place. Query text sent to ClickHouse is not modified.
 
-While masking is on, query errors are `[clickhouse_query_failed] result was not returned`. Startup errors are `[clickhouse_startup_failed] ClickHouse startup check failed`. Connection errors from `config check --connect` are `[clickhouse_connect_failed] result was not returned`. An unrecognized AI setting value is `[clickhouse_setting_failed] result was not returned`. Those messages omit driver and setting text. While masking is off, an unrecognized AI setting error includes the setting text. While masking is on, a debug log for any request other than `/healthz` records `route` instead of `path`. The recorded class is `mcp`, `sse`, `message`, or `other`. `/healthz` is not logged. The placeholder and those fixed errors are not treated as stored data. A short literal that also occurs inside them can remain there.
+While masking is on, query errors are `[clickhouse_query_failed] result was not returned`. Startup errors are `[clickhouse_startup_failed] ClickHouse startup check failed`. Connection errors from `config check --connect` are `[clickhouse_connect_failed] result was not returned`. An unrecognized AI setting is folded into the startup error. While masking is on, the process prints `[clickhouse_startup_failed] ClickHouse startup check failed` and omits the setting text. While masking is off, it prints `[clickhouse_startup_failed] ClickHouse startup check failed: unrecognized AI function setting "<text>"`, with the setting text in quotes. The query, startup, and `config check --connect` messages above omit driver and setting text while masking is on. While masking is on, a debug log for any request other than `/healthz` records `route` instead of `path`. The recorded class is `mcp`, `sse`, `message`, or `other`. `/healthz` is not logged. The placeholder and those fixed errors are not treated as stored data. A short literal that also occurs inside them can remain there.
 
 ## Service account
 
@@ -512,14 +516,14 @@ Issues for this repository are tracked at <https://github.com/futuretea/clickhou
 
 ## Troubleshoot
 
-- `clickhouse.address is required`: set `host:port`, or set `MCP_CLICKHOUSE_ADDRESS`.
-- `load config: clickhouse.address is invalid`: remove the scheme, path, query, and userinfo.
-- `load config: configuration is invalid`: the YAML file is missing or is not valid configuration. The message does not quote the file.
+- `clickhouse.address is required`: this is `config check` with no address. Set `host:port`, or set `MCP_CLICKHOUSE_ADDRESS`. `mcp` and `tools` add the prefix `load config:`.
+- `load config: clickhouse.address is invalid`: this is `config check` for an address that is not `host:port`. `mcp` and `tools` keep the specific validator text, such as `load config: clickhouse.address must be host:port without a URL scheme`.
+- `load config: configuration is invalid`: this is `config check` for a missing file, a bad boolean, or other invalid configuration. The message does not quote the file. `mcp` and `tools` say `load config: read config file: configuration is invalid` for a missing file, and `load config: unmarshal config: configuration is invalid` for a bad boolean.
 - `invalid masking config`: the masking document is empty, unknown, or enabled with no rules.
 - `[clickhouse_unsafe_service_role]`: the account matches [Service account](#service-account). Use a `SELECT`-only user, or set `allow_unsafe_database_role` only on an instance you control.
-- `[clickhouse_startup_failed] ClickHouse startup check failed:`: masking is off, and the driver text follows the colon. A refused connection includes `connection refused`. An empty username appears as the user `default` in that text. A configured password is replaced with `[redacted]`.
+- `[clickhouse_startup_failed] ClickHouse startup check failed:`: masking is off, and the driver text follows the colon. A refused connection includes `connection refused`. An empty username appears as the user `default`. A password appears as `***` in the URL, as in `http://default:***@127.0.0.1:1` from the 0.2.1 linux/amd64 binary. A raw password that is still present is replaced with `[redacted]`.
 - `[clickhouse_startup_failed] ClickHouse startup check failed`: masking is on. There is no driver text.
-- `[clickhouse_query_failed]`, `[clickhouse_connect_failed]`, `[clickhouse_setting_failed]`, and `[clickhouse_masking_failed]`: masking is on, or the result could not be masked. No partial tool result is returned.
+- `[clickhouse_query_failed]`, `[clickhouse_connect_failed]`, and `[clickhouse_masking_failed]`: masking is on, or the result could not be masked. No partial tool result is returned. An AI setting failure is reported as `[clickhouse_startup_failed]`, not as a separate setting code.
 - `ClickHouse ping failed:`: `config check --connect` could not ping. This check does not judge privileges.
 - `truncated: true`: lower the result in SQL, or raise `max_rows` on purpose.
 - `query must contain exactly one SQL statement`: send one statement.

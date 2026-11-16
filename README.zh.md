@@ -27,8 +27,10 @@ npx -y @futuretea/clickhouse-mcp-server@0.2.1 version
 这不会打印版本。包装器仍会启动 `mcp`。没有 ClickHouse 地址时，进程以退出码 1 结束，并打印：
 
 ```text
-clickhouse.address is required; set a host:port such as 127.0.0.1:8123
+load config: clickhouse.address is required; set a host:port such as 127.0.0.1:8123
 ```
+
+`mcp` 和 `tools call` 打印同一行。`config check` 打印这句话，但没有 `load config:` 前缀。`config check` 会改写若干加载错误。`mcp`、`tools` 和包装器不会。
 
 包装器的 tarball 包含 `bin/index.js`、`package.json`、`README.md` 和 `LICENSE`。二进制文件在平台包里。npm 会安装与你的操作系统和 CPU 匹配的包。`0.2.1` 发布了这些包：
 
@@ -111,11 +113,13 @@ make build
 clickhouse.address is required; set a host:port such as 127.0.0.1:8123
 ```
 
-不是 `host:port` 的地址，包括 `http://127.0.0.1:8123`，会被报告为：
+`mcp` 和 `tools` 把缺少地址报告为：
 
 ```text
-load config: clickhouse.address is invalid
+load config: clickhouse.address is required; set a host:port such as 127.0.0.1:8123
 ```
+
+`config check` 把 `http://127.0.0.1:8123` 报告为 `load config: clickhouse.address is invalid`。`mcp` 和 `tools` 把同一个地址报告为 `load config: clickhouse.address must be host:port without a URL scheme`。路径或 userinfo 在 `mcp` 和 `tools` 上是 `load config: clickhouse.address must be a host:port`，在 `config check` 上是 `load config: clickhouse.address is invalid`。超出 1 到 65535 的端口在 `mcp` 和 `tools` 上是 `load config: clickhouse.address must use a port from 1 to 65535`，在 `config check` 上仍是那条 invalid 消息。
 
 没有 `--address` 标志，也没有连接 URL 字段。
 
@@ -136,7 +140,7 @@ load config: clickhouse.address is invalid
 
 `secure: true` 对 ClickHouse 使用 HTTPS，并要求 TLS 1.2 或更新的版本。它不会给 MCP 的 HTTP 端口加 TLS。
 
-`clickhouse.secure` 和 `allow_unsafe_database_role` 是布尔值。环境变量的值是字符串，Viper 用 `strconv.ParseBool` 解码这个字符串。接受的 true 字符串是 `1`、`t`、`T`、`true`、`TRUE` 和 `True`。接受的 false 字符串是 `0`、`f`、`F`、`false`、`FALSE` 和 `False`。`config check` 对 `MCP_CLICKHOUSE_SECURE` 接受 `1`、`t`、`T`、`true`、`TRUE`、`True`、`0`、`f`、`F`、`false`、`FALSE` 和 `False`。它对 `MCP_ALLOW_UNSAFE_DATABASE_ROLE` 接受 `1`。`yes`、`on` 和带前后空格的值会被拒绝。进程以退出码 1 结束，并打印 `load config: configuration is invalid`。空的环境变量值会被忽略。YAML 布尔值 `true` 或 `false` 可以接受。YAML 值 `yes` 或 `"yes"` 会以同一个错误被拒绝。
+`clickhouse.secure` 和 `allow_unsafe_database_role` 是布尔值。环境变量的值是字符串，Viper 用 `strconv.ParseBool` 解码这个字符串。接受的 true 字符串是 `1`、`t`、`T`、`true`、`TRUE` 和 `True`。接受的 false 字符串是 `0`、`f`、`F`、`false`、`FALSE` 和 `False`。`config check` 对 `MCP_CLICKHOUSE_SECURE` 接受 `1`、`t`、`T`、`true`、`TRUE`、`True`、`0`、`f`、`F`、`false`、`FALSE` 和 `False`。它对 `MCP_ALLOW_UNSAFE_DATABASE_ROLE` 接受 `1`。`yes`、`on` 和带前后空格的值会被拒绝。`config check` 以退出码 1 结束，并打印 `load config: configuration is invalid`。`mcp` 和 `tools` 以退出码 1 结束，并打印 `load config: unmarshal config: configuration is invalid`。空的环境变量值会被忽略。YAML 布尔值 `true` 或 `false` 可以接受。YAML 值 `yes` 或 `"yes"` 会被拒绝。`config check` 使用那条通用配置错误。`mcp` 使用 unmarshal 错误。
 
 `clickhouse.username` 为空时，`0.2.1` 的驱动会发送 ClickHouse 用户 `default`。常规安装会授予该用户 `ALL ON *.*`，启动会拒绝它。请把 `clickhouse.username` 设成只有 `SELECT` 的用户。参见[服务账号](#服务账号)。
 
@@ -274,7 +278,7 @@ docker run --rm -p 127.0.0.1:8080:8080 \
 
 省略 `database` 时使用 `clickhouse.database`。`max_rows` 默认为 1000，schema 的最小值是 1。不是正整数的值会返回 `max_rows must be a positive integer`。查询工具会多读一行来设置 `truncated`。这一行不会返回。`truncated` 为 false 时仍然出现。列出和描述工具不使用 `max_rows`。
 
-脱敏关闭时，非空单元格是字符串。数据库 NULL 是 JSON `null`。脱敏打开时，未命中的单元格保持该显示文本。命中的嵌套 map 或 slice 变成 JSON。名字规则把命中的字符串换成占位符，并把其他命中的类型换成 JSON `null`。
+`clickhouse_query` 的行保留驱动的显示值。脱敏关闭时，非空查询单元格是字符串，数据库 NULL 是 JSON `null`。`clickhouse_list_databases`、`clickhouse_list_tables` 和 `clickhouse_describe_table` 返回字符串。NULL 的名字、引擎、注释、类型、默认值种类或默认值表达式变成 `""`。脱敏打开时，未命中的查询单元格保持该显示文本。查询行里命中的嵌套 map 或 slice 变成 JSON。名字规则把命中的字符串换成占位符。在查询行里，命中的非字符串变成 JSON `null`。列出和描述会把这个 null 再转成 `""`。
 
 `tools list` 打印这四个工具，并且不连接。地址拒绝连接时，这条命令仍然以退出码 0 结束：
 
@@ -356,7 +360,7 @@ masking=disabled source=default
 config=(not set) source=default
 ```
 
-来源标签是 `flag`、`environment`、`YAML` 和 `default`。除非你传入 `--connect`，否则命令不会打开网络。`--connect` 打开一次 HTTP 或 HTTPS 连接，执行 ping，然后关闭。它不运行权限检查。成功时打印 `ClickHouse connection verified.`。失败时打印 `ClickHouse ping failed:` 和驱动文本，已配置的密码会被换成 `[redacted]`。
+来源标签是 `flag`、`environment`、`YAML` 和 `default`。除非你传入 `--connect`，否则命令不会打开网络。`--connect` 打开一次 HTTP 或 HTTPS 连接，执行 ping，然后关闭。它不运行权限检查。成功时打印 `ClickHouse connection verified.`。失败时打印 `ClickHouse ping failed:` 和驱动文本。带密码的被拒绝连接在 URL 里把密码显示为 `***`，例如 `http://default:***@127.0.0.1:1`。服务器还会把仍然留下的原始密码、它的 query 转义形式、path 转义形式和 userinfo 形式换成 `[redacted]`。在上面这条被拒绝连接的文本里，密码已经是 `***`，所以行里没有 `[redacted]`。
 
 ```bash
 ./bin/clickhouse-mcp-server config check --connect
@@ -404,7 +408,7 @@ export MCP_MASKING_JSON='{"enabled":true,"values":["synthetic-token-value"]}'
 
 名字模式会先单独解析，再锚定到整个字段名。`a)|(b` 会被拒绝。`(?:a)|(b)` 只匹配完整名字 `a` 和 `b`。值字面量和值模式是子串匹配，包括单字符字面量。RE2 返回最左优先的匹配，不会再找更长的分支。占位符不会被再次搜索。
 
-命中的字符串变成占位符。命中的数字、布尔值或其他非字符串变成 JSON `null`。原来的 null 仍是 null。结果里的 null 可能是数据库 NULL，也可能是被抹掉的值，而且 JSON 类型可能改变。
+命中的字符串变成占位符。命中的数字、布尔值或其他非字符串在遍历中变成 null。原来的 null 仍是 null。在 `clickhouse_query` 的行里，这个 null 仍是 JSON `null`，所以它可能是数据库 NULL，也可能是被抹掉的值，而且 JSON 类型可能改变。列出和描述把这些字段存成字符串，因此这个 null 变成 `""`。
 
 服务器在 `fmt.Sprint` 之前对驱动扫描值应用字段规则。未命中的单元格保持原来的显示文本。ClickHouse 不会在脱敏前解码 base64 字符串。值规则命中数字、布尔值、时间、时长、IP 地址、UUID 或地理值的原始显示文本时，整个值变成 null。未命中的值保持原来的 `fmt.Sprint` 文本。JSON 数字保留文档里的数字，包括末尾的 0。JSON 值会再按容器计一次，因此同样大小的 JSON 可能比普通字符串更早用完共享预算。ClickHouse 的 JSON 和 Variant 会被遍历。两个列名脱敏成同一个字符串时，结果失败。
 
@@ -414,7 +418,7 @@ export MCP_MASKING_JSON='{"enabled":true,"values":["synthetic-token-value"]}'
 
 脱敏找不到所有私密值。压缩数据和服务器不认识的编码不会被就地改写。发给 ClickHouse 的查询文本不会被修改。
 
-脱敏打开时，查询错误是 `[clickhouse_query_failed] result was not returned`。启动错误是 `[clickhouse_startup_failed] ClickHouse startup check failed`。`config check --connect` 的连接错误是 `[clickhouse_connect_failed] result was not returned`。无法识别的 AI 设置值是 `[clickhouse_setting_failed] result was not returned`。这些消息省略驱动和设置文本。脱敏关闭时，无法识别的 AI 设置错误会包含设置文本。脱敏打开时，除 `/healthz` 以外的请求，调试日志记录 `route` 而不是 `path`。记录的类别是 `mcp`、`sse`、`message` 或 `other`。`/healthz` 不会被记录。占位符和这些固定错误不当作存储的数据。占位符或固定错误里碰巧包含的短字面量仍可能留在那里。
+脱敏打开时，查询错误是 `[clickhouse_query_failed] result was not returned`。启动错误是 `[clickhouse_startup_failed] ClickHouse startup check failed`。`config check --connect` 的连接错误是 `[clickhouse_connect_failed] result was not returned`。无法识别的 AI 设置会并入启动错误。脱敏打开时，进程打印 `[clickhouse_startup_failed] ClickHouse startup check failed`，并省略设置文本。脱敏关闭时，它打印 `[clickhouse_startup_failed] ClickHouse startup check failed: unrecognized AI function setting "<text>"`，设置文本在引号里。上面的查询、启动和 `config check --connect` 消息在脱敏打开时省略驱动和设置文本。脱敏打开时，除 `/healthz` 以外的请求，调试日志记录 `route` 而不是 `path`。记录的类别是 `mcp`、`sse`、`message` 或 `other`。`/healthz` 不会被记录。占位符和这些固定错误不当作存储的数据。占位符或固定错误里碰巧包含的短字面量仍可能留在那里。
 
 ## 服务账号
 
@@ -512,14 +516,14 @@ make ci
 
 ## 排查
 
-- `clickhouse.address is required`：设置 `host:port`，或设置 `MCP_CLICKHOUSE_ADDRESS`。
-- `load config: clickhouse.address is invalid`：去掉 scheme、path、query 和 userinfo。
-- `load config: configuration is invalid`：YAML 文件缺失，或不是有效配置。这条消息不会引用文件内容。
+- `clickhouse.address is required`：这是没有地址时的 `config check`。设置 `host:port`，或设置 `MCP_CLICKHOUSE_ADDRESS`。`mcp` 和 `tools` 会加上前缀 `load config:`。
+- `load config: clickhouse.address is invalid`：这是 `config check` 对非 `host:port` 地址的报告。`mcp` 和 `tools` 保留具体的校验文本，例如 `load config: clickhouse.address must be host:port without a URL scheme`。
+- `load config: configuration is invalid`：这是 `config check` 对缺失文件、错误布尔值或其他无效配置的报告。这条消息不会引用文件内容。缺失文件时，`mcp` 和 `tools` 说 `load config: read config file: configuration is invalid`。错误布尔值时，它们说 `load config: unmarshal config: configuration is invalid`。
 - `invalid masking config`：脱敏文档为空、包含未知内容，或已启用但没有规则。
 - `[clickhouse_unsafe_service_role]`：账号命中[服务账号](#服务账号)里的规则。请使用只有 `SELECT` 的用户，或只在你控制的实例上设置 `allow_unsafe_database_role`。
-- `[clickhouse_startup_failed] ClickHouse startup check failed:`：脱敏关闭，冒号后面是驱动文本。被拒绝的连接会包含 `connection refused`。用户名为空时，这段文本里的用户是 `default`。已配置的密码会被换成 `[redacted]`。
+- `[clickhouse_startup_failed] ClickHouse startup check failed:`：脱敏关闭，冒号后面是驱动文本。被拒绝的连接会包含 `connection refused`。用户名为空时，用户显示为 `default`。密码在 URL 里显示为 `***`，0.2.1 的 linux/amd64 二进制文件给出 `http://default:***@127.0.0.1:1`。仍然留下的原始密码会被换成 `[redacted]`。
 - `[clickhouse_startup_failed] ClickHouse startup check failed`：脱敏打开。没有驱动文本。
-- `[clickhouse_query_failed]`、`[clickhouse_connect_failed]`、`[clickhouse_setting_failed]` 和 `[clickhouse_masking_failed]`：脱敏已打开，或结果无法完成脱敏。不会返回部分工具结果。
+- `[clickhouse_query_failed]`、`[clickhouse_connect_failed]` 和 `[clickhouse_masking_failed]`：脱敏已打开，或结果无法完成脱敏。不会返回部分工具结果。AI 设置失败报告为 `[clickhouse_startup_failed]`，不是单独的设置错误码。
 - `ClickHouse ping failed:`：`config check --connect` 无法 ping。这次检查不判断权限。
 - `truncated: true`：在 SQL 里缩小结果，或有意提高 `max_rows`。
 - `query must contain exactly one SQL statement`：只发送一条语句。
