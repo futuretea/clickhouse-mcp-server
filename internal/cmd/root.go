@@ -126,10 +126,12 @@ func buildToolCatalog(cfg *config.StaticConfig) ([]toolset.ServerTool, error) {
 
 func buildToolCatalogForToolsets(cfg *config.StaticConfig, toolsets []toolset.Toolset) ([]toolset.ServerTool, error) {
 	return toolcatalog.Build(toolsets, toolset.FilterOptions{
-		EnabledTools:    cfg.EnabledTools,
-		DisabledTools:   cfg.DisabledTools,
-		EnabledDomains:  cfg.EnabledDomains,
-		DisabledDomains: cfg.DisabledDomains,
+		EnabledTools:        cfg.EnabledTools,
+		BlankEnabledTools:   cfg.BlankEnabledTools,
+		DisabledTools:       cfg.DisabledTools,
+		EnabledDomains:      cfg.EnabledDomains,
+		BlankEnabledDomains: cfg.BlankEnabledDomains,
+		DisabledDomains:     cfg.DisabledDomains,
 	})
 }
 

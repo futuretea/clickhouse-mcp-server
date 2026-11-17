@@ -26,10 +26,12 @@ type ToolHandler func(ctx context.Context, params map[string]any) (string, error
 
 // FilterOptions controls which tools are exposed.
 type FilterOptions struct {
-	EnabledTools    []string
-	DisabledTools   []string
-	EnabledDomains  []string
-	DisabledDomains []string
+	EnabledTools        []string
+	BlankEnabledTools   bool
+	DisabledTools       []string
+	EnabledDomains      []string
+	BlankEnabledDomains bool
+	DisabledDomains     []string
 }
 
 // FilterTools applies enable/disable lists for tools and domains.
@@ -44,7 +46,7 @@ func FilterTools(tools []ServerTool, opts FilterOptions) []ServerTool {
 		name := tool.Tool.Name
 		domain := tool.Domain
 
-		if len(enabledTools) > 0 {
+		if opts.BlankEnabledTools || len(enabledTools) > 0 {
 			if _, ok := enabledTools[name]; !ok {
 				continue
 			}
@@ -52,7 +54,7 @@ func FilterTools(tools []ServerTool, opts FilterOptions) []ServerTool {
 		if _, ok := disabledTools[name]; ok {
 			continue
 		}
-		if len(enabledDomains) > 0 {
+		if opts.BlankEnabledDomains || len(enabledDomains) > 0 {
 			if _, ok := enabledDomains[domain]; !ok {
 				continue
 			}

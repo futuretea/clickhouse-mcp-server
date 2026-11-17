@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/futuretea/clickhouse-mcp-server/pkg/toolset"
+	clickhousetoolset "github.com/futuretea/clickhouse-mcp-server/pkg/toolset/clickhouse"
 )
 
 func newToolsCommand(streams IOStreams, cfgFile *string, v *viper.Viper) *cobra.Command {
@@ -113,6 +114,9 @@ func newToolsCallCommand(streams IOStreams, cfgFile *string, v *viper.Viper) *co
 			}
 			if _, ok := findTool(catalog, args[0]); !ok {
 				return fmt.Errorf("unknown tool %q; run 'clickhouse-mcp-server tools list' to see available tools", args[0])
+			}
+			if err := clickhousetoolset.ValidateCall(args[0], params); err != nil {
+				return err
 			}
 			toolsets, err := runtimeToolsets(cmd.Context(), cfg)
 			if err != nil {

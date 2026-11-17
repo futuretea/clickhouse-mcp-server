@@ -287,11 +287,11 @@ MCP_CLICKHOUSE_ADDRESS=127.0.0.1:8123 \
   ./bin/clickhouse-mcp-server tools list --json
 ```
 
-`tools describe` and `tools describe <name> --json` also use the catalog only. `tools call` connects and runs the startup check.
+`tools describe` and `tools describe <name> --json` also use the catalog only. `tools call` checks parameters before it connects. Accepted parameters connect and run the startup check.
 
 `tools describe` and `tools call` reject a name that is missing or removed by the filters. The error includes that name. For the name `missing`, it is `unknown tool "missing"; run 'clickhouse-mcp-server tools list' to see available tools`. An MCP `tools/call` for a missing or filtered name is answered by the MCP library used by this server. That message is `tool 'missing' not found: tool not found`. It also includes the requested name. The CLI text and the MCP text are different.
 
-An empty `enabled_tools` list means all tools. A non-empty list is an allowlist. `disabled_tools` then removes names. Domain filters use the same order for the domain `clickhouse`. If the filters remove every tool, `mcp` exits with:
+An empty `enabled_tools` list means all tools. A non-empty list is an allowlist. A list whose entries are all blank is not empty. `enabled_tools` and `enabled_domains` then allow no tools. `disabled_tools` and `disabled_domains` still remove nothing. `disabled_tools` then removes names. Domain filters use the same order for the domain `clickhouse`. If the filters remove every tool, `mcp` exits with:
 
 ```text
 no tools registered; check enabled_tools / disabled_tools / domain filters

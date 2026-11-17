@@ -55,10 +55,12 @@ func NewServer(configuration Configuration) (*Server, error) {
 
 func (s *Server) registerTools() error {
 	filtered, err := toolcatalog.Build(s.configuration.Toolsets, toolset.FilterOptions{
-		EnabledTools:    s.configuration.EnabledTools,
-		DisabledTools:   s.configuration.DisabledTools,
-		EnabledDomains:  s.configuration.EnabledDomains,
-		DisabledDomains: s.configuration.DisabledDomains,
+		EnabledTools:        s.configuration.EnabledTools,
+		BlankEnabledTools:   s.configuration.BlankEnabledTools,
+		DisabledTools:       s.configuration.DisabledTools,
+		EnabledDomains:      s.configuration.EnabledDomains,
+		BlankEnabledDomains: s.configuration.BlankEnabledDomains,
+		DisabledDomains:     s.configuration.DisabledDomains,
 	})
 	if err != nil {
 		return fmt.Errorf("build tool catalog: %w", err)
