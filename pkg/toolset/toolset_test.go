@@ -43,6 +43,26 @@ func TestFilterTools(t *testing.T) {
 			opts: toolset.FilterOptions{EnabledTools: []string{"missing"}},
 			want: nil,
 		},
+		{
+			name: "blank allowlist matches nothing",
+			opts: toolset.FilterOptions{BlankEnabledTools: true},
+			want: nil,
+		},
+		{
+			name: "blank domain allowlist matches nothing",
+			opts: toolset.FilterOptions{BlankEnabledDomains: true},
+			want: nil,
+		},
+		{
+			name: "blank name beside a real tool keeps the tool",
+			opts: toolset.FilterOptions{EnabledTools: []string{"ping", " "}},
+			want: []string{"ping"},
+		},
+		{
+			name: "blank denylist removes nothing",
+			opts: toolset.FilterOptions{DisabledTools: []string{" ", ""}},
+			want: []string{"echo", "ping", "other"},
+		},
 	}
 
 	for _, tt := range tests {

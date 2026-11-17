@@ -287,11 +287,11 @@ MCP_CLICKHOUSE_ADDRESS=127.0.0.1:8123 \
   ./bin/clickhouse-mcp-server tools list --json
 ```
 
-`tools describe` 和 `tools describe <name> --json` 也只使用工具目录。`tools call` 会连接并执行启动检查。
+`tools describe` 和 `tools describe <name> --json` 也只使用工具目录。`tools call` 会在连接之前检查参数。参数通过后才会连接并执行启动检查。
 
 `tools describe` 和 `tools call` 会拒绝缺失的名字，以及被过滤去掉的名字。错误里包含这个名字。对于名字 `missing`，错误是 `unknown tool "missing"; run 'clickhouse-mcp-server tools list' to see available tools`。对缺失或被过滤名字的 MCP `tools/call` 由本服务器使用的 MCP 库回答。那条消息是 `tool 'missing' not found: tool not found`。它也包含请求的名字。CLI 文本和 MCP 文本不一样。
 
-空的 `enabled_tools` 表示全部工具。非空列表是允许列表。`disabled_tools` 再按名字去掉工具。域过滤对域 `clickhouse` 使用同样的顺序。如果过滤后一个工具都不剩，`mcp` 退出并打印：
+空的 `enabled_tools` 表示全部工具。非空列表是允许列表。条目全部为空白的列表不是空列表。`enabled_tools` 和 `enabled_domains` 此时不允许任何工具。`disabled_tools` 和 `disabled_domains` 仍然不删除任何工具。`disabled_tools` 再按名字去掉工具。域过滤对域 `clickhouse` 使用同样的顺序。如果过滤后一个工具都不剩，`mcp` 退出并打印：
 
 ```text
 no tools registered; check enabled_tools / disabled_tools / domain filters

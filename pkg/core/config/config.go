@@ -16,15 +16,17 @@ import (
 
 // StaticConfig contains configuration that is fixed when the server starts.
 type StaticConfig struct {
-	Port            int              `mapstructure:"port"`
-	Listen          string           `mapstructure:"listen"`
-	SSEBaseURL      string           `mapstructure:"sse_base_url"`
-	LogLevel        string           `mapstructure:"log_level"`
-	EnabledTools    []string         `mapstructure:"enabled_tools"`
-	DisabledTools   []string         `mapstructure:"disabled_tools"`
-	EnabledDomains  []string         `mapstructure:"enabled_domains"`
-	DisabledDomains []string         `mapstructure:"disabled_domains"`
-	ClickHouse      ClickHouseConfig `mapstructure:"clickhouse"`
+	Port                int              `mapstructure:"port"`
+	Listen              string           `mapstructure:"listen"`
+	SSEBaseURL          string           `mapstructure:"sse_base_url"`
+	LogLevel            string           `mapstructure:"log_level"`
+	EnabledTools        []string         `mapstructure:"enabled_tools"`
+	DisabledTools       []string         `mapstructure:"disabled_tools"`
+	EnabledDomains      []string         `mapstructure:"enabled_domains"`
+	DisabledDomains     []string         `mapstructure:"disabled_domains"`
+	BlankEnabledTools   bool             `mapstructure:"-"`
+	BlankEnabledDomains bool             `mapstructure:"-"`
+	ClickHouse          ClickHouseConfig `mapstructure:"clickhouse"`
 
 	// AllowUnsafeDatabaseRole skips only the startup service-account privilege
 	// rejection. Connection and grant-probe failures still abort startup.
@@ -142,9 +144,9 @@ func LoadConfig(configPath string, v *viper.Viper) (*StaticConfig, error) {
 	if cfg.ClickHouse.Database == "" {
 		cfg.ClickHouse.Database = "default"
 	}
-	cfg.EnabledTools = normalizeStringSlice(cfg.EnabledTools)
+	cfg.EnabledTools, cfg.BlankEnabledTools = normalizeAllowlist(cfg.EnabledTools)
 	cfg.DisabledTools = normalizeStringSlice(cfg.DisabledTools)
-	cfg.EnabledDomains = normalizeStringSlice(cfg.EnabledDomains)
+	cfg.EnabledDomains, cfg.BlankEnabledDomains = normalizeAllowlist(cfg.EnabledDomains)
 	cfg.DisabledDomains = normalizeStringSlice(cfg.DisabledDomains)
 
 	if err := cfg.Validate(); err != nil {
@@ -166,6 +168,11 @@ func loadMaskingPolicy(v *viper.Viper) (masking.Policy, error) {
 		return masking.Disabled(), nil
 	}
 	return masking.ParseRaw(v.Get("masking"))
+}
+
+func normalizeAllowlist(values []string) ([]string, bool) {
+	normalized := normalizeStringSlice(values)
+	return normalized, len(values) > 0 && len(normalized) == 0
 }
 
 func normalizeStringSlice(values []string) []string {

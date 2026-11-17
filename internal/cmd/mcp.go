@@ -70,6 +70,14 @@ func runServer(ctx context.Context, cfgFile string, streams IOStreams, v *viper.
 		return fmt.Errorf("initialize logging: %w", err)
 	}
 
+	tools, err := buildToolCatalog(cfg)
+	if err != nil {
+		return err
+	}
+	if len(tools) == 0 {
+		return fmt.Errorf("no tools registered; check enabled_tools / disabled_tools / domain filters")
+	}
+
 	toolsets, err := runtimeToolsets(ctx, cfg)
 	if err != nil {
 		return err

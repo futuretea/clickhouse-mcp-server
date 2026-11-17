@@ -204,14 +204,7 @@ func (t *Toolset) describeTable(ctx context.Context, params map[string]any) (str
 }
 
 func (t *Toolset) query(ctx context.Context, params map[string]any) (string, error) {
-	statement, err := requiredString(params, "query")
-	if err != nil {
-		return "", err
-	}
-	if err := validateSingleStatement(statement); err != nil {
-		return "", err
-	}
-	maxRows, err := parseMaxRows(params["max_rows"])
+	statement, maxRows, err := parseQueryArguments(params)
 	if err != nil {
 		return "", err
 	}
@@ -226,15 +219,57 @@ func (t *Toolset) query(ctx context.Context, params map[string]any) (string, err
 	return t.emit(result)
 }
 
+func ValidateCall(name string, params map[string]any) error {
+	switch name {
+	case "clickhouse_list_tables":
+		return validateOptionalArgument(params, "database")
+	case "clickhouse_describe_table":
+		if _, err := requiredString(params, "table"); err != nil {
+			return err
+		}
+		return validateOptionalArgument(params, "database")
+	case "clickhouse_query":
+		_, _, err := parseQueryArguments(params)
+		return err
+	default:
+		return nil
+	}
+}
+
+func parseQueryArguments(params map[string]any) (string, int, error) {
+	statement, err := requiredString(params, "query")
+	if err != nil {
+		return "", 0, err
+	}
+	if err := validateSingleStatement(statement); err != nil {
+		return "", 0, err
+	}
+	maxRows, err := parseMaxRows(params["max_rows"])
+	if err != nil {
+		return "", 0, err
+	}
+	return statement, maxRows, nil
+}
+
 func (t *Toolset) optionalString(params map[string]any, key string) (string, error) {
+	if err := validateOptionalArgument(params, key); err != nil {
+		return "", err
+	}
 	if params == nil || params[key] == nil {
 		return t.database, nil
 	}
+	return strings.TrimSpace(params[key].(string)), nil
+}
+
+func validateOptionalArgument(params map[string]any, key string) error {
+	if params == nil || params[key] == nil {
+		return nil
+	}
 	value, ok := params[key].(string)
 	if !ok || strings.TrimSpace(value) == "" {
-		return "", fmt.Errorf("%s must be a non-empty string", key)
+		return fmt.Errorf("%s must be a non-empty string", key)
 	}
-	return strings.TrimSpace(value), nil
+	return nil
 }
 
 func requiredString(params map[string]any, key string) (string, error) {
